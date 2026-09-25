@@ -11,6 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
 from . import catalog as catalog_mod, pipeline
+from .exploration import exploration_area
 from .site import site_summary
 from .adapters import cadastre
 from .adapters.base import AdapterUnavailable
@@ -91,6 +92,16 @@ def site(req: SiteRequest) -> dict:
         return site_summary(req.plots, req.crops)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.get("/api/exploration-area")
+def exploration(force: bool = Query(False, description="recompute instead of using the cached choice")) -> dict:
+    """Where to open the map: the best agricultural cluster found in the LIVE cadastre, with its reasons."""
+    try:
+        data, meta = exploration_area(force=force)
+        return {**data, "status": meta["status"], "retrieved_at": meta.get("retrieved_at")}
+    except AdapterUnavailable as exc:
+        raise HTTPException(status_code=503, detail=f"Could not identify an exploration area: {exc}") from exc
 
 
 @app.get("/api/sources/status")

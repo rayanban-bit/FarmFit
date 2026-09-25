@@ -26,14 +26,16 @@ interface Props {
   pieces: MapPiece[] | null;
   fitToken: number;
   fitIds: string[] | null;
+  /** Opening viewport, derived from the live cadastre. */
+  initialBounds?: [number, number, number, number] | null;
 }
 
-/** Al Shahaniya farming belt - opens over real agricultural parcels. */
-const START: [number, number, number, number] = [51.17, 25.36, 51.27, 25.43];
+/** Fallback only, used when the live cadastral service cannot be reached to choose an opening view. */
+const FALLBACK_BOUNDS: [number, number, number, number] = [51.17, 25.36, 51.27, 25.43];
 const ACCENT = "#1f5c4d";
 export const MIN_PARCEL_ZOOM = 12.5;
 
-export default function MapView({ parcels, selected, onToggle, onViewChange, pieces, fitToken, fitIds }: Props) {
+export default function MapView({ parcels, selected, onToggle, onViewChange, pieces, fitToken, fitIds, initialBounds }: Props) {
   const el = useRef<HTMLDivElement>(null);
   const map = useRef<maplibregl.Map | null>(null);
   const ready = useRef(false);
@@ -51,7 +53,7 @@ export default function MapView({ parcels, selected, onToggle, onViewChange, pie
     if (!el.current || map.current) return;
     const m = new maplibregl.Map({
       container: el.current,
-      bounds: START,
+      bounds: initialBounds ?? FALLBACK_BOUNDS,
       fitBoundsOptions: { padding: 30 },
       attributionControl: { compact: true },
       style: {
@@ -124,7 +126,7 @@ export default function MapView({ parcels, selected, onToggle, onViewChange, pie
       map.current = null;
       ready.current = false;
     };
-  }, []);
+  }, [initialBounds]);
 
   // live parcels + selection
   useEffect(() => {

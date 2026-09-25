@@ -1,4 +1,4 @@
-import type { Catalog, MissingInput, OptimizeRequest, OptimizeResult, ParcelFC, SiteSummary, StreamEvent } from "./types";
+import type { Catalog, ExplorationArea, MissingInput, OptimizeRequest, OptimizeResult, ParcelFC, SiteSummary, StreamEvent } from "./types";
 
 export const API = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
 
@@ -45,6 +45,9 @@ export const getSiteSummary = (plots: OptimizeRequest["plots"], crops: string[],
   fetch(`${API}/api/site-summary`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ plots, crops }), signal }).then((r) =>
     j<SiteSummary>(r),
   );
+
+/** The opening viewport, chosen from live cadastral data rather than a hardcoded coordinate. */
+export const getExplorationArea = () => fetch(`${API}/api/exploration-area`).then((r) => j<ExplorationArea>(r));
 
 export const getSourceStatus = () =>
   fetch(`${API}/api/sources/status`).then((r) =>

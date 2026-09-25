@@ -2,8 +2,8 @@
 
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { Catalog, IterationRec, MissingInput, OptimizeResult, ParcelFC, SiteSummary } from "@/lib/types";
-import { API, compareScenarios, getCatalog, getContext, getParcels, getSiteSummary, optimizeStream } from "@/lib/api";
+import type { Catalog, ExplorationArea, IterationRec, MissingInput, OptimizeResult, ParcelFC, SiteSummary } from "@/lib/types";
+import { API, compareScenarios, getCatalog, getContext, getExplorationArea, getParcels, getSiteSummary, optimizeStream } from "@/lib/api";
 import { buildRequest, initialState, unresolved, type PlanState } from "@/lib/state";
 import { layoutPlot } from "@/lib/layout";
 import { n0 } from "@/lib/format";
@@ -38,6 +38,9 @@ export default function Page() {
   const [fitToken, setFitToken] = useState(0);
   const [focus, setFocus] = useState<string[] | null>(null);
   const [context, setContext] = useState<Record<string, { text: string } | undefined>>({});
+  const [explore, setExplore] = useState<ExplorationArea | null>(null);
+  const [exploreReady, setExploreReady] = useState(false);
+  const [showExplore, setShowExplore] = useState(false);
   const [site, setSite] = useState<SiteSummary | null>(null);
   const [siteLoading, setSiteLoading] = useState(false);
   const [siteError, setSiteError] = useState<string | null>(null);
@@ -55,6 +58,12 @@ export default function Page() {
         setSt(initialState(c));
       })
       .catch((e) => setLoadError(String(e.message ?? e)));
+    // The opening viewport is chosen from live cadastral data, not hardcoded. If it cannot be determined
+    // the map still opens, on a documented fallback extent.
+    getExplorationArea()
+      .then((a) => setExplore(a))
+      .catch(() => setExplore(null))
+      .finally(() => setExploreReady(true));
   }, []);
 
   const set = useCallback((p: Partial<PlanState>) => setSt((s) => (s ? { ...s, ...p } : s)), []);
@@ -299,7 +308,9 @@ export default function Page() {
         </aside>
 
         <main className="relative min-w-0 flex-1">
+          {exploreReady && (
           <MapView
+            initialBounds={explore ? (explore.bbox as [number, number, number, number]) : null}
             parcels={shownParcels}
             selected={mode === "results" && result ? result.plots.map((p) => p.plot_id) : (st?.selected ?? [])}
             onToggle={onToggle}
@@ -308,12 +319,43 @@ export default function Page() {
             fitToken={fitToken}
             fitIds={mode === "results" ? focus : null}
           />
+          )}
           <Legend techniques={legendTechs} show={mode === "results" && !!pieces} />
 
           {mode === "plan" && st && (
-            <div className="absolute left-3 top-3 border border-[var(--line-strong)] bg-[var(--panel)] px-3 py-1.5 text-[12px]">
-              <span className="num">{n0(selectedArea)} m²</span>
-              <span className="text-[var(--muted)]"> selected · {parcelInfo.zoomedOut ? "zoom in to load cadastral plots" : "click a plot to select it"}</span>
+            <div className="absolute left-3 top-3 max-w-[430px] border border-[var(--line-strong)] bg-[var(--panel)] text-[12px]">
+              <div className="px-3 py-1.5">
+                <span className="num">{n0(selectedArea)} m²</span>
+                <span className="text-[var(--muted)]"> selected · {parcelInfo.zoomedOut ? "zoom in to load cadastral plots" : "click a plot to select it"}</span>
+              </div>
+              {explore && (
+                <div className="border-t border-[var(--line)] px-3 py-1.5">
+                  <button className="flex w-full items-center gap-2 text-left" onClick={() => setShowExplore(!showExplore)}>
+                    <span className="inline-block h-1.5 w-1.5 shrink-0" style={{ background: "var(--accent)" }} />
+                    <span className="flex-1 text-[11.5px] text-[var(--muted)]">
+                      {explore.label} · {explore.window}
+                    </span>
+                    <span className="text-[11px] text-[var(--faint)]">{showExplore ? "hide" : "why here"}</span>
+                  </button>
+                  {showExplore && (
+                    <div className="mt-1.5 border-t border-[var(--line)] pt-1.5 text-[11px] leading-snug text-[var(--muted)]">
+                      <ul className="space-y-0.5">
+                        {explore.reasons.map((r, i) => (
+                          <li key={i} className="flex gap-1.5"><span className="mt-[6px] inline-block h-[3px] w-[3px] shrink-0 bg-[var(--faint)]" />{r}</li>
+                        ))}
+                      </ul>
+                      <div className="mt-1.5 text-[10.5px] text-[var(--faint)]">
+                        Chosen by querying {explore.windows_searched.length} farming municipalities in the live cadastre
+                        ({explore.windows_searched.reduce((a, w) => a + w.plots_found, 0).toLocaleString()} plots screened)
+                        and ranking clusters on {explore.criteria_used.join(", ").replace(/_/g, " ")}.
+                        {explore.criteria_uninformative.length > 0 &&
+                          ` ${explore.criteria_uninformative.join(", ").replace(/_/g, " ")} did not vary between candidates and was excluded.`}
+                        {" "}No plot is preselected.
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
             </div>
           )}
           {layoutError && <div className="absolute left-3 top-3 max-w-[360px]"><Notice tone="bad">Layout could not be generated: {layoutError}</Notice></div>}

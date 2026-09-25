@@ -58,7 +58,7 @@ npm install --legacy-peer-deps
 npm run dev          # http://localhost:3000
 ```
 
-Tests: `cd backend && .venv\Scripts\python -m pytest` (86) and `cd frontend && npm test` (16).
+Tests: `cd backend && .venv\Scripts\python -m pytest` (96) and `cd frontend && npm test` (16).
 `data/cache/` ships with real API responses so everything works offline; with a network the adapters refresh it.
 
 ## 1. Cadastral map — live, official
@@ -79,6 +79,34 @@ the current map view as you pan, are clickable and multi-selectable, and a selec
 recomputed from the returned ring and agrees to **about +0.2 %** (a projection/datum difference), and both are
 shown in the data panel. Layer metadata is read at run time, so a field change adapts rather than breaks.
 Service errors surface as a message, never as substituted geometry. **No demo geometry remains in the repo.**
+
+## Where the map opens: chosen from live data, not hardcoded
+
+The startup viewport is derived at run time by `app/exploration.py` (`GET /api/exploration-area`). The only
+fixed geography is a list of **search windows** over Qatar's named farming municipalities — where to look.
+What you see is decided by the data:
+
+1. Page through the cadastre in each window with `returnCentroid=true`, keeping plots whose registered area
+   falls in an agricultural band (5,000–1,000,000 m²; the layer carries no land-use field, and residential
+   plots are a few hundred m²). No polygon geometry is downloaded.
+2. Bin the centroids onto a ~780 m grid, form a candidate cluster around each populated cell, suppress
+   overlaps.
+3. Rank on measurable criteria: **size diversity** (log-spread of plot areas), **farmland context** (OSM
+   `landuse=farmland|farmyard|orchard|greenhouse_horticulture` within 3 km), **plot count** (scored against a
+   10–30 band — comfortable to compare, not the densest block), **compactness**, **road access** and
+   **market-distance spread**.
+4. Fit the map to the winner and label it *“Suggested exploration area — real Qatar cadastral data”*, with the
+   reasons available behind “why here”. **No plot is preselected.**
+
+A criterion that does not vary between candidates is **dropped and its weight redistributed**, rather than
+scoring every candidate 1.0 — an earlier version did the latter and silently gave full marks for a signal that
+was absent. Overpass is flaky, so OSM enrichment runs only on the finalists and the result records which
+criteria actually contributed.
+
+At the time of writing this picks a cluster in the Al Rayyan outskirts: **9 plots from 10,000 to 972,134 m²**
+(57× between the 10th and 90th percentile) within a 619 m radius, selected after screening **6,632 plots across
+6 municipalities**. The result is cached, so startup is instant; the ranking is deterministic, so the same data
+gives the same viewport.
 
 ## 2–5. Data sources
 

@@ -309,3 +309,27 @@ export type StreamEvent =
   | ({ event: "iteration" } & { k: number; lambda: number; net_gain: number; capex: number; F: number; mip_status: string; mip_ms: number })
   | { event: "result"; data: OptimizeResult }
   | { event: "error"; message: string };
+
+/** Where the map opens: the best agricultural cluster found in the live cadastre. */
+export interface ExplorationArea {
+  bbox: [number, number, number, number];
+  centre: [number, number];
+  window: string;
+  label: string;
+  plot_count: number;
+  min_area_m2: number;
+  max_area_m2: number;
+  median_area_m2: number;
+  radius_m: number;
+  score: number;
+  reasons: string[];
+  criteria: Record<string, number>;
+  criteria_used: string[];
+  criteria_uninformative: string[];
+  weights: Record<string, number>;
+  windows_searched: { window: string; plots_found: number; candidate_clusters: number; status?: string; error?: string }[];
+  runners_up: { window: string; centre: [number, number]; plots: number; score: number }[];
+  method: string;
+  status: string;
+  retrieved_at?: string;
+}

@@ -22,7 +22,7 @@ def _queries(lon: float, lat: float) -> list[str]:
     return [
         f'[out:json][timeout:25];(node["shop"~"^(supermarket|greengrocer|wholesale)$"](around:{RADIUS_M},{lat},{lon});'
         f'node["amenity"="marketplace"](around:{RADIUS_M},{lat},{lon}););out 60;',
-        f'[out:json][timeout:25];way["highway"~"^(motorway|trunk|primary)$"](around:8000,{lat},{lon});out center 60;',
+        f'[out:json][timeout:25];way["highway"~"^(motorway|trunk|primary|secondary|tertiary)$"](around:8000,{lat},{lon});out center 60;',
     ]
 
 
@@ -55,7 +55,9 @@ def nearest_access(lon: float, lat: float, force: bool = False) -> tuple[dict, d
             continue
         d = haversine_m(lon, lat, c["lon"], c["lat"])
         tags = e.get("tags", {})
-        rec = {"name": tags.get("name") or tags.get("name:en") or "(unnamed)", "distance_m": d, "kind": tags.get("shop") or tags.get("amenity") or tags.get("highway")}
+        rec = {"name": tags.get("name") or tags.get("name:en") or "(unnamed)", "distance_m": d,
+               "kind": tags.get("shop") or tags.get("amenity") or tags.get("highway"),
+               "lon": c["lon"], "lat": c["lat"]}
         (roads if "highway" in tags else markets).append(rec)
     markets.sort(key=lambda r: r["distance_m"])
     roads.sort(key=lambda r: r["distance_m"])
