@@ -36,7 +36,7 @@ def test_budget_constraint_binds_and_is_respected():
 
 
 def test_water_constraint_annual_and_monthly():
-    p = make_problem(water_year=3_000, min_utilisation=0.0, monthly_peak_factor=1.0)
+    p = make_problem(water_year=3_000, min_utilisation=0.0, water_month_max=3_000 / 12)
     sol = solve(p)
     assert sol.metrics["water_m3"] <= 3_000 + 1e-6
     assert max(sol.metrics["water_month"]) <= 3_000 / 12 + 1e-6
@@ -49,7 +49,7 @@ def test_monthly_water_binds_before_annual():
         seasonal[m] = 1.0  # 3 m3/m2 in Jan-Mar only
     opts = [Option("c", "t", rev_m2=40, opex_m2=10, capex_m2=10, water_m=seasonal, energy_m=flat(0), yield_kg_m2=5)]
     techs = {"t": TechIn("t", 100, 0, 0, [])}
-    lim = Limits(budget=1e9, water_year=12_000, monthly_peak_factor=1.0, min_block_m2=100, min_utilisation=0.0)
+    lim = Limits(budget=1e9, water_year=12_000, water_month_max=1_000, min_block_m2=100, min_utilisation=0.0)
     p = Problem([PlotIn("P", 100_000)], opts, techs, {}, lim)
     sol = solve(p)
     # annual cap alone would allow 4000 m2; monthly cap (1000 m3/month / 1 m3/m2/month) allows only 1000 m2
@@ -58,7 +58,7 @@ def test_monthly_water_binds_before_annual():
 
 
 def test_energy_constraint():
-    p = make_problem(energy_year=20_000, min_utilisation=0.0, monthly_peak_factor=1.0)
+    p = make_problem(energy_year=20_000, min_utilisation=0.0, energy_month_max=20_000 / 12)
     sol = solve(p)
     assert sol.metrics["energy_kwh"] <= 20_000 + 1e-6
     assert check_feasible(p, sol.alloc) == []
@@ -101,10 +101,13 @@ def test_objective_value_matches_independent_evaluation():
     p = make_problem(min_utilisation=0.0, budget=600_000)
     sol = solve(p)
     ev = evaluate(p, sol.alloc)
-    last = sol.iterations[-1]
-    assert last.n == pytest.approx(ev["net_gain"], rel=1e-9)
+    # The reported metrics must equal an independent recomputation from the allocation.
+    assert sol.metrics["net_gain"] == pytest.approx(ev["net_gain"], rel=1e-9)
     assert ev["roi"] == pytest.approx(ev["net_gain"] / ev["capex"])
     assert sol.metrics["roi"] == pytest.approx(ev["roi"])
+    # At the Dinkelbach root lambda equals the optimal ratio. The final iterate itself may be the trivial
+    # zero-CapEx point that ties the optimum there, so compare against lambda rather than that iterate's N.
+    assert sol.metrics["roi"] == pytest.approx(sol.iterations[-1].lam, rel=1e-6)
 
 
 def test_optimum_is_at_least_as_good_as_every_single_option_baseline():
@@ -136,15 +139,21 @@ def test_utilisation_floor_relaxed_with_warning_when_infeasible():
     assert sol.utilisation_floor_used == 0.0
 
 
-def test_infeasible_when_minimum_scale_exceeds_budget():
+def test_no_viable_investment_when_minimum_scale_exceeds_budget():
+    """Nothing can be built for QAR 1,000, and with no utilisation floor "build nothing" is feasible.
+
+    The honest answer is therefore that no investment exists, not that the constraint set is empty.
+    """
     p = make_problem(budget=1_000, min_utilisation=0.0)
     sol = solve(p)
-    assert sol.status == "INFEASIBLE"
+    assert sol.status == "NO_VIABLE_INVESTMENT"
     assert sol.alloc == {}
+    assert sol.metrics["roi"] is None
+    assert any("No viable investment solution" in w for w in sol.warnings)
 
 
 def test_multi_plot_shares_resources_globally():
-    p = make_problem(water_year=6_000, min_utilisation=0.0, monthly_peak_factor=1.0)
+    p = make_problem(water_year=6_000, min_utilisation=0.0, water_month_max=500)
     p.plots = [PlotIn("P1", 6_000), PlotIn("P2", 6_000)]
     sol = solve(p)
     assert sol.metrics["water_m3"] <= 6_000 + 1e-6

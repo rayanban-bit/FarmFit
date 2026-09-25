@@ -1,16 +1,72 @@
 import type { Feature, FeatureCollection, MultiPolygon, Polygon } from "geojson";
 
 export type SourceType =
+  | "official_qatar"
   | "official_dataset"
   | "scientific_model"
+  | "peer_reviewed"
   | "open_dataset"
+  | "vendor_data"
   | "user_supplied"
-  | "prototype_assumption";
+  | "unverified";
+
+export type InputTier = "essential" | "advanced";
+
+export interface MissingInput {
+  kind: "crops" | "techniques" | "infrastructure" | "defaults" | "yields";
+  owner: string;
+  field: string;
+  label: string;
+  unit: string;
+  has_profile_value: boolean;
+  profile_value: number | null;
+  tier: InputTier;
+  note: string;
+}
+
+/** A fact FarmFit determined by itself from the selected plots. */
+export type FactState = "verified" | "estimate" | "unavailable";
+
+export interface SiteFact {
+  key: string;
+  label: string;
+  value: string | number | null;
+  unit: string;
+  state: FactState;
+  source: string;
+  url: string;
+  date: string;
+  note: string;
+}
+
+export interface SiteYield {
+  crop: string;
+  crop_name: string;
+  technique: string;
+  technique_name: string;
+  state: FactState;
+  value: number | null;
+  unit: string;
+  source: string;
+  url: string;
+  date: string;
+  note: string;
+}
+
+export interface SiteSummary {
+  plots: { plot_id: string; name: string; area_m2: number; registered_area_m2: number | null; centroid: [number, number]; geometry_source: string; facts: SiteFact[] }[];
+  yields: SiteYield[];
+  total_area_m2: number;
+}
 
 export interface Leaf<T = number> {
   value: T | null;
   unit: string;
   src: string;
+  required_input?: boolean;
+  label?: string;
+  profile_value?: number | null;
+  profile_note?: string;
 }
 
 export interface SourceRec {
@@ -24,6 +80,10 @@ export interface SourceRec {
 
 export interface CropDef {
   name: string;
+  priority: number;
+  evidence: string;
+  seedlings_qar_m2_cycle: Leaf;
+  nutrients_qar_m2_cycle: Leaf;
   price_qar_kg: Leaf;
   cycle_days: Leaf;
   aquacrop: { supported: boolean; crop?: string };
@@ -37,7 +97,8 @@ export interface TechDef {
   compatible_crops: string[];
   capex_qar_m2: Leaf;
   fixed_capex_qar: Leaf;
-  opex_qar_m2_year: Leaf;
+  opex_components: Record<string, Leaf>;
+  no_profile_reason?: string;
   energy_kwh_m2_year: Leaf;
   water_coefficient: Leaf;
   min_area_m2: Leaf;
@@ -56,7 +117,21 @@ export interface Catalog {
 }
 
 export type Geo = Polygon | MultiPolygon;
-export type ParcelFC = FeatureCollection<Geo, { id: string; name: string; district?: string; area_m2: number; source?: string; data_status?: string }>;
+export interface ParcelProps {
+  id: string;
+  name: string;
+  plot_pin: number | null;
+  object_id: number | null;
+  area_m2: number;
+  registered_area_m2: number | null;
+  geodesic_area_m2: number;
+  centroid: [number, number];
+  data_status: string;
+  PD_NO?: string | null;
+  REF_NUMBER?: string | null;
+  [k: string]: unknown;
+}
+export type ParcelFC = FeatureCollection<Geo, ParcelProps>;
 export type ParcelFeature = Feature<Geo, ParcelFC["features"][number]["properties"]>;
 
 export interface Constraints {
@@ -66,7 +141,8 @@ export interface Constraints {
   soil_ec_ds_m: number | null;
   access_fraction: number;
   min_land_utilisation: number;
-  monthly_peak_factor: number;
+  water_peak_m3_month: number | null;
+  energy_peak_kwh_month: number | null;
   min_block_m2: number;
   max_crop_share: number;
   objective: "roi" | "net_profit";
@@ -74,7 +150,7 @@ export interface Constraints {
 }
 
 export interface OptimizeRequest {
-  plots: { id: string; name?: string; geometry: Geo; source?: string }[];
+  plots: { id: string; name?: string; geometry: Geo; source?: string; registered_area_m2?: number | null }[];
   crops: string[];
   techniques: string[];
   constraints: Constraints;
@@ -83,6 +159,7 @@ export interface OptimizeRequest {
   water_qar_m3?: number | null;
   scenario: string;
   overrides: Record<string, unknown>;
+  accept_planning_profile: boolean;
 }
 
 export interface Summary {
@@ -138,6 +215,8 @@ export interface PlotResult {
   infrastructure: { group: string; name: string; fixed_capex: number; used_by: string[]; capex_saved_by_sharing: number }[];
   centroid: [number, number];
   geometry_source: string;
+  registered_area_m2: number | null;
+  geodesic_area_m2: number;
 }
 
 export interface BaselineOut {
@@ -195,7 +274,7 @@ export interface OptimizeResult {
   scenario: { id: string; name: string; description: string; water_factor: number; electricity_price_factor: number };
   status: string;
   objective: "roi" | "net_profit";
-  solver: { backend: string; method: string; iterations: IterationRec[]; n_binary: number; n_vars: number; n_constraints: number; wall_ms: number; utilisation_floor_requested: number; utilisation_floor_used: number };
+  solver: { backend: string; method: string; iterations: IterationRec[]; n_binary: number; n_vars: number; n_constraints: number; wall_ms: number; utilisation_floor_requested: number; utilisation_floor_used: number; ratio_outcome: string };
   summary: Summary;
   portfolio: PortfolioRow[];
   plots: PlotResult[];
@@ -204,9 +283,21 @@ export interface OptimizeResult {
   baseline_free: BaselineOut | null;
   comparison_free: ComparisonRow[] | null;
   monthly: { months: string[]; water_m3: number[]; energy_kwh: number[]; water_cap_m3: number | null; energy_cap_kwh: number | null };
-  limits: { budget_qar: number; water_m3_year: number; energy_kwh_year: number; usable_m2: number; total_m2: number };
+  limits: { budget_qar: number; water_m3_year: number; energy_kwh_year: number; usable_m2: number; total_m2: number; water_peak_m3_month: number | null; energy_peak_kwh_month: number | null };
+  limiting: {
+    usable_m2: number;
+    allocated_m2: number;
+    unallocated_m2: number;
+    unallocated_share: number;
+    limiting_factor: string | null;
+    headline: string;
+    land_supported_m2: number | null;
+    limits: { key: string; label: string; used: number; limit: number | null; utilisation: number | null; land_supported_m2: number | null; binding: boolean; note: string }[];
+  };
   options: { plot_id: string; crop: string; technique: string; marginal_roi: number | null; profit_m2_year: number }[];
-  excluded: { plot: string; crop: string; technique: string; reason: string }[];
+  excluded: { plot: string; crop: string; technique: string; reason: string; kind?: string; missing?: { label: string; unit: string }[] }[];
+  missing_inputs: MissingInput[];
+  accepted_planning_profile: boolean;
   warnings: string[];
   explanations: Explanation[];
   data_panel: DataRow[];

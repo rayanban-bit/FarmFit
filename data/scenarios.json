@@ -1,8 +1,8 @@
 {
   "_readme": "Scenarios only change constraints/prices; the same optimizer recomputes the design. They are what-if definitions, not predictions.",
   "scenarios": {
-    "normal": {"name": "Normal", "description": "Base parameters as entered.", "water_factor": 1.0, "electricity_price_factor": 1.0, "src": "proto_scenario"},
-    "water_constrained": {"name": "Water-constrained", "description": "Available water reduced to 40% of the entered value.", "water_factor": 0.4, "electricity_price_factor": 1.0, "src": "proto_scenario"},
-    "energy_expensive": {"name": "Energy-expensive", "description": "Electricity unit price multiplied by 5.", "water_factor": 1.0, "electricity_price_factor": 5.0, "src": "proto_scenario"}
+    "normal": {"name": "Normal", "description": "Base parameters as entered.", "water_factor": 1.0, "electricity_price_factor": 1.0, "src": "model_choice"},
+    "water_constrained": {"name": "Water-constrained", "description": "Available water reduced to 40% of the entered value.", "water_factor": 0.4, "electricity_price_factor": 1.0, "src": "model_choice"},
+    "energy_expensive": {"name": "Energy-expensive", "description": "Electricity unit price multiplied by 5.", "water_factor": 1.0, "electricity_price_factor": 5.0, "src": "model_choice"}
   }
 }

@@ -19,3 +19,4 @@ export const TECH_COLOR: Record<string, string> = {
 export const TECH_ORDER = ["greenhouse", "hydroponic_greenhouse", "vertical_hydroponics", "open_field"];
 export const ACCESS_COLOR = "#8d8d86";
 export const RESERVE_COLOR = "#c9c6bb";
+export const qarKg = (v: number) => `QAR ${v.toFixed(2)}/kg`;

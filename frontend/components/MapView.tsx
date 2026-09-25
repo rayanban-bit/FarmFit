@@ -9,6 +9,8 @@ import type { ParcelFC } from "@/lib/types";
 import { ACCESS_COLOR, RESERVE_COLOR, TECH_COLOR, n0 } from "@/lib/format";
 import type { LayoutPiece } from "@/lib/layout";
 
+maplibregl.setWorkerUrl("/maplibre/maplibre-gl-worker.mjs");
+
 export interface MapPiece extends LayoutPiece {
   plotId: string;
   cropName?: string;
@@ -19,35 +21,38 @@ interface Props {
   parcels: ParcelFC | null;
   selected: string[];
   onToggle: (id: string) => void;
-  pieces: MapPiece[] | null; // results layout; null while planning
-  fitToken: number; // change to refit
-  fitIds: string[] | null; // plots to fit to (null = current selection)
+  /** Called (debounced) when the view settles, so the page can fetch live cadastral plots for it. */
+  onViewChange: (bbox: [number, number, number, number], zoom: number) => void;
+  pieces: MapPiece[] | null;
+  fitToken: number;
+  fitIds: string[] | null;
 }
 
-maplibregl.setWorkerUrl("/maplibre/maplibre-gl-worker.mjs");
-
-const QATAR: [number, number, number, number] = [50.7, 24.4, 51.75, 26.25];
+/** Al Shahaniya farming belt - opens over real agricultural parcels. */
+const START: [number, number, number, number] = [51.17, 25.36, 51.27, 25.43];
 const ACCENT = "#1f5c4d";
+export const MIN_PARCEL_ZOOM = 12.5;
 
-export default function MapView({ parcels, selected, onToggle, pieces, fitToken, fitIds }: Props) {
+export default function MapView({ parcels, selected, onToggle, onViewChange, pieces, fitToken, fitIds }: Props) {
   const el = useRef<HTMLDivElement>(null);
   const map = useRef<maplibregl.Map | null>(null);
   const ready = useRef(false);
-  const markers = useRef<maplibregl.Marker[]>([]);
   const pending = useRef<(() => void)[]>([]);
-  const whenReady = (fn: () => void) => (ready.current ? fn() : pending.current.push(fn));
+  const markers = useRef<maplibregl.Marker[]>([]);
   const toggleRef = useRef(onToggle);
+  const viewRef = useRef(onViewChange);
   useEffect(() => {
     toggleRef.current = onToggle;
-  }, [onToggle]);
+    viewRef.current = onViewChange;
+  }, [onToggle, onViewChange]);
+  const whenReady = (fn: () => void) => (ready.current ? fn() : pending.current.push(fn));
 
-  // ---- init
   useEffect(() => {
     if (!el.current || map.current) return;
     const m = new maplibregl.Map({
       container: el.current,
-      bounds: QATAR,
-      fitBoundsOptions: { padding: 20 },
+      bounds: START,
+      fitBoundsOptions: { padding: 30 },
       attributionControl: { compact: true },
       style: {
         version: 8,
@@ -63,41 +68,55 @@ export default function MapView({ parcels, selected, onToggle, pieces, fitToken,
     map.current = m;
     m.addControl(new maplibregl.NavigationControl({ showCompass: false }), "top-right");
     m.addControl(new maplibregl.ScaleControl({ unit: "metric" }), "bottom-right");
+
     m.on("load", () => {
       const empty: FeatureCollection = { type: "FeatureCollection", features: [] };
       m.addSource("parcels", { type: "geojson", data: empty });
-      m.addSource("parcel-pts", { type: "geojson", data: empty });
       m.addSource("layout", { type: "geojson", data: empty });
-      m.addLayer({ id: "parcel-fill", type: "fill", source: "parcels", paint: { "fill-color": "#6d726c", "fill-opacity": 0.35 } });
-      m.addLayer({ id: "parcel-line", type: "line", source: "parcels", paint: { "line-color": "#3c403c", "line-width": 1.2 } });
-      m.addLayer({ id: "layout-fill", type: "fill", source: "layout", paint: { "fill-color": ["get", "color"], "fill-opacity": 0.82 } });
-      m.addLayer({ id: "layout-line", type: "line", source: "layout", paint: { "line-color": "#fbfaf6", "line-width": 1.4 } });
-      m.addLayer({ id: "plot-outline", type: "line", source: "parcels", filter: ["==", ["get", "sel"], 1], paint: { "line-color": "#1b1e1c", "line-width": 2 } });
       m.addLayer({
-        id: "parcel-pt", type: "circle", source: "parcel-pts",
-        paint: {
-          "circle-radius": ["interpolate", ["linear"], ["zoom"], 8, 6, 12, 8, 14, 0],
-          "circle-color": ["case", ["==", ["get", "sel"], 1], ACCENT, "#ffffff"],
-          "circle-stroke-color": ["case", ["==", ["get", "sel"], 1], "#ffffff", "#3c403c"],
-          "circle-stroke-width": 1.6,
-          "circle-opacity": ["interpolate", ["linear"], ["zoom"], 13, 1, 14, 0],
-          "circle-stroke-opacity": ["interpolate", ["linear"], ["zoom"], 13, 1, 14, 0],
-        },
+        id: "parcel-fill", type: "fill", source: "parcels",
+        paint: { "fill-color": ["case", ["==", ["get", "sel"], 1], ACCENT, "#6d726c"], "fill-opacity": ["case", ["==", ["get", "sel"], 1], 0.45, 0.13] },
       });
-      for (const layer of ["parcel-pt", "parcel-fill"]) {
-        m.on("click", layer, (e: maplibregl.MapLayerMouseEvent) => {
-          const id = e.features?.[0]?.properties?.id as string | undefined;
-          if (id) toggleRef.current(id);
-        });
-        m.on("mouseenter", layer, () => (m.getCanvas().style.cursor = "pointer"));
-        m.on("mouseleave", layer, () => (m.getCanvas().style.cursor = ""));
-      }
+      m.addLayer({
+        id: "parcel-line", type: "line", source: "parcels",
+        paint: { "line-color": ["case", ["==", ["get", "sel"], 1], "#12352c", "#5d625c"], "line-width": ["case", ["==", ["get", "sel"], 1], 2, 0.8] },
+      });
+      m.addLayer({ id: "layout-fill", type: "fill", source: "layout", paint: { "fill-color": ["get", "color"], "fill-opacity": 0.85 } });
+      m.addLayer({ id: "layout-line", type: "line", source: "layout", paint: { "line-color": "#fbfaf6", "line-width": 1.4 } });
+
+      m.on("click", "parcel-fill", (e: maplibregl.MapLayerMouseEvent) => {
+        const id = e.features?.[0]?.properties?.id as string | undefined;
+        if (id) toggleRef.current(id);
+      });
+      m.on("mouseenter", "parcel-fill", () => (m.getCanvas().style.cursor = "pointer"));
+      m.on("mouseleave", "parcel-fill", () => (m.getCanvas().style.cursor = ""));
+
       const syncLabels = () => m.getContainer().classList.toggle("map-hide-labels", m.getZoom() < 15.2);
       m.on("zoom", syncLabels);
       syncLabels();
+
+      let t: ReturnType<typeof setTimeout> | null = null;
+      const report = () => {
+        if (t) clearTimeout(t);
+        t = setTimeout(() => {
+          const b = m.getBounds();
+          viewRef.current([b.getWest(), b.getSouth(), b.getEast(), b.getNorth()], m.getZoom());
+        }, 400);
+      };
+      m.on("moveend", report);
+      // The map lives in a flex column, so the container can still be sizing when "load" fires and
+      // getBounds()/getZoom() would then describe the wrong view. Re-measure once the map is idle.
+      m.resize();
+      m.once("idle", () => {
+        m.resize();
+        report();
+      });
+      report();
+
       ready.current = true;
       pending.current.splice(0).forEach((fn) => fn());
     });
+
     return () => {
       pending.current = [];
       markers.current.forEach((k) => k.remove());
@@ -107,33 +126,25 @@ export default function MapView({ parcels, selected, onToggle, pieces, fitToken,
     };
   }, []);
 
-  // ---- data sync (parcels + selection)
+  // live parcels + selection
   useEffect(() => {
     const m = map.current;
-    if (!m || !parcels) return;
+    if (!m) return;
     const apply = () => {
       if (map.current !== m || !m.getSource("parcels")) return;
       const sel = new Set(selected);
       const fc: FeatureCollection = {
         type: "FeatureCollection",
-        features: parcels.features.map((f) => ({ ...f, properties: { ...f.properties, sel: sel.has(f.properties.id) ? 1 : 0 } })),
-      };
-      const pts: FeatureCollection = {
-        type: "FeatureCollection",
-        features: parcels.features.map((f) => {
-          const c = turf.centroid(f as Feature<Geometry>);
-          return { ...c, properties: { id: f.properties.id, sel: sel.has(f.properties.id) ? 1 : 0 } };
-        }),
+        features: (parcels?.features ?? []).map((f) => ({ ...f, properties: { ...f.properties, sel: sel.has(f.properties.id) ? 1 : 0 } })),
       };
       (m.getSource("parcels") as maplibregl.GeoJSONSource).setData(fc);
-      (m.getSource("parcel-pts") as maplibregl.GeoJSONSource).setData(pts);
-      m.setPaintProperty("parcel-fill", "fill-color", ["case", ["==", ["get", "sel"], 1], ACCENT, "#6d726c"]);
-      m.setPaintProperty("parcel-fill", "fill-opacity", pieces ? ["case", ["==", ["get", "sel"], 1], 0.0, 0.12] : ["case", ["==", ["get", "sel"], 1], 0.5, 0.3]);
+      // once a layout is drawn, fade the raw parcel fill so the management blocks read clearly
+      m.setPaintProperty("parcel-fill", "fill-opacity", pieces ? ["case", ["==", ["get", "sel"], 1], 0.0, 0.08] : ["case", ["==", ["get", "sel"], 1], 0.45, 0.13]);
     };
     whenReady(apply);
   }, [parcels, selected, pieces]);
 
-  // ---- results layout
+  // optimized layout
   useEffect(() => {
     const m = map.current;
     if (!m) return;
@@ -144,10 +155,7 @@ export default function MapView({ parcels, selected, onToggle, pieces, fitToken,
         features: (pieces ?? []).map((p) => ({
           type: "Feature",
           geometry: p.geometry,
-          properties: {
-            color: p.kind === "access" ? ACCESS_COLOR : p.kind === "reserve" ? RESERVE_COLOR : TECH_COLOR[p.technique ?? ""] ?? "#555",
-            label: p.label,
-          },
+          properties: { color: p.kind === "access" ? ACCESS_COLOR : p.kind === "reserve" ? RESERVE_COLOR : TECH_COLOR[p.technique ?? ""] ?? "#555" },
         })),
       };
       (m.getSource("layout") as maplibregl.GeoJSONSource).setData(fc);
@@ -168,14 +176,15 @@ export default function MapView({ parcels, selected, onToggle, pieces, fitToken,
     whenReady(apply);
   }, [pieces]);
 
-  // ---- fit
+  // fit to selection / focus
   useEffect(() => {
     const m = map.current;
     if (!m || !parcels || fitToken === 0) return;
-    const feats = parcels.features.filter((f) => (fitIds ?? selected).includes(f.properties.id));
+    const want = fitIds ?? selected;
+    const feats = parcels.features.filter((f) => want.includes(f.properties.id));
     if (!feats.length) return;
     const bb = turf.bbox(turf.featureCollection(feats as Feature<Geometry>[]));
-    m.fitBounds([[bb[0], bb[1]], [bb[2], bb[3]]], { padding: 90, maxZoom: 17.4, duration: 700 });
+    m.fitBounds([[bb[0], bb[1]], [bb[2], bb[3]]], { padding: 90, maxZoom: 17.6, duration: 700 });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fitToken]);
 
@@ -195,8 +204,8 @@ export function Legend({ techniques, show }: { techniques: { id: string; name: s
       ))}
       <div className="flex items-center gap-2"><span className="inline-block h-2.5 w-2.5" style={{ background: ACCESS_COLOR }} />Access / infrastructure</div>
       <div className="flex items-center gap-2"><span className="inline-block h-2.5 w-2.5" style={{ background: RESERVE_COLOR }} />Unallocated</div>
-      <div className="mt-1.5 max-w-[210px] text-[10.5px] leading-snug text-[var(--muted)]">
-        Areas come from the optimizer. Geometry is a feasible blueprint, not a spatially optimised design.
+      <div className="mt-1.5 max-w-[215px] text-[10.5px] leading-snug text-[var(--muted)]">
+        Blocks are drawn inside the real cadastral boundary. Areas come from the solver; the arrangement is a feasible blueprint, not a spatially optimised design.
       </div>
     </div>
   );

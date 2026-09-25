@@ -38,13 +38,50 @@ def test_polygon_with_hole_and_multipolygon_area():
     assert multi == pytest.approx(2 * full)
 
 
-def test_demo_parcels_have_computed_area_and_label():
+def test_live_cadastre_metadata_matches_the_documented_service():
+    """The layer we rely on must really be a public, queryable polygon layer in the Qatar National Grid."""
     from app.adapters import cadastre
-    fc = cadastre.demo_parcels()
-    assert len(fc["features"]) >= 5
+    from app.adapters.base import AdapterUnavailable
+    try:
+        meta, m = cadastre.describe()
+    except AdapterUnavailable as exc:
+        pytest.skip(f"cadastral service unavailable and not cached: {exc}")
+    assert meta["geometryType"] == "esriGeometryPolygon"
+    assert "Query" in (meta["capabilities"] or "")
+    assert meta["native_wkid"] == 2932  # QND 1995 / Qatar National Grid
+    names = {f["name"] for f in meta["fields"]}
+    assert {"OBJECTID", "PIN", "PDAREA"} <= names
+    assert "CadastrePlots" in m["source_url"]
+
+
+def test_live_cadastre_returns_wgs84_polygons_with_registered_areas():
+    from app.adapters import cadastre
+    from app.adapters.base import AdapterUnavailable
+    try:
+        fc, _ = cadastre.query_bbox((51.15, 25.35, 51.30, 25.45), min_area_m2=5000, limit=10)
+    except AdapterUnavailable as exc:
+        pytest.skip(f"cadastral service unavailable and not cached: {exc}")
+    assert fc["features"]
     for f in fc["features"]:
-        assert f["properties"]["area_m2"] > 1000
-        assert "DEMO" in f["properties"]["data_status"]
+        q = f["properties"]
+        assert f["geometry"]["type"] in ("Polygon", "MultiPolygon")
+        lon, lat = q["centroid"]
+        assert 50.5 < lon < 52.0 and 24.4 < lat < 26.3, "coordinates must be WGS84 inside Qatar"
+        assert q["data_status"] == "Live cadastral service"
+        assert q["registered_area_m2"] > 0
+        # the officially registered area must agree with a geodesic area recomputed from the boundary
+        assert abs(q["geodesic_area_m2"] - q["registered_area_m2"]) / q["registered_area_m2"] < 0.02
+        assert str(q["plot_pin"]) == q["id"] or str(q["object_id"]) == q["id"]
+        # normalised keys must not collide case-insensitively with the raw ArcGIS attributes,
+        # or case-insensitive JSON parsers (PowerShell, some .NET) reject the response outright
+        lower = [k.lower() for k in q]
+        assert len(lower) == len(set(lower)), f"duplicate keys ignoring case: {sorted(k for k in lower if lower.count(k) > 1)}"
+
+
+def test_cadastre_rejects_a_malformed_bbox():
+    from app.adapters import cadastre
+    with pytest.raises(ValueError):
+        cadastre.query_bbox((52.0, 25.0, 51.0, 26.0))
 
 
 # ---------------------------------------------------------------- climate / model correctness
@@ -169,10 +206,29 @@ def test_validate_flags_unknown_source_and_incompatibility():
 
 
 def test_overrides_are_relabelled_user_supplied():
-    cat = catalog.apply_overrides(catalog.base_catalog(), {"crops": {"tomato": {"price_qar_kg": 9.5}}, "techniques": {"greenhouse": {"capex_qar_m2": 200}}})
-    assert cat["crops"]["tomato"]["price_qar_kg"] == {"value": 9.5, "unit": "QAR/kg", "src": "user"}
+    cat, _ = catalog.resolve(catalog.base_catalog(),
+                             {"crops": {"tomato": {"price_qar_kg": 9.5}}, "techniques": {"greenhouse": {"capex_qar_m2": 200}}},
+                             accept_planning_profile=False)
+    assert cat["crops"]["tomato"]["price_qar_kg"]["value"] == 9.5
+    assert cat["crops"]["tomato"]["price_qar_kg"]["src"] == "user"
     assert cat["techniques"]["greenhouse"]["capex_qar_m2"]["src"] == "user"
     assert provenance.source("user")["type"] == "user_supplied"
+
+
+def test_required_inputs_start_unresolved_and_block_their_combinations():
+    base = catalog.base_catalog()
+    cat, missing = catalog.resolve(base, None, accept_planning_profile=False)
+    assert missing, "a fresh catalog must report unresolved required inputs"
+    assert cat["crops"]["tomato"]["price_qar_kg"]["value"] is None
+    need = catalog.missing_for(cat, "tomato", "greenhouse")
+    assert need and all(n["label"] for n in need)
+
+
+def test_missing_for_is_empty_once_everything_is_supplied():
+    cat, _ = catalog.resolve(catalog.base_catalog(), None, accept_planning_profile=True)
+    assert catalog.missing_for(cat, "tomato", "greenhouse") == []
+    # vertical hydroponics deliberately has no planning figure - a vendor quotation is required
+    assert catalog.missing_for(cat, "lettuce", "vertical_hydroponics")
 
 
 def test_row_from_param_marks_missing_values():
@@ -182,7 +238,7 @@ def test_row_from_param_marks_missing_values():
     assert r2.value is None and r2.status == "missing" and r2.type == "user_supplied"
 
 
-def test_provenance_registry_types_are_the_five_allowed_kinds():
+def test_provenance_registry_types_are_allowed_kinds():
     reg = provenance.registry()
     assert {s["type"] for s in reg.values()} <= set(provenance.TYPES)
     for sid, s in reg.items():

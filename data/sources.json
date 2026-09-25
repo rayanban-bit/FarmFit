@@ -1,136 +1,125 @@
 {
-  "_readme": "Provenance registry. Every numeric parameter in crops.json / techniques.json / infrastructure.json / scenarios.json / defaults.json references one entry here via its 'src' key. type is one of: official_dataset | scientific_model | open_dataset | user_supplied | prototype_assumption.",
+  "_readme": "Provenance registry. Every numeric parameter elsewhere references one entry here via its 'src' key. type is one of: official_qatar | official_dataset | scientific_model | peer_reviewed | open_dataset | vendor_data | user_supplied | unverified. A parameter with no defensible source must use src 'required' and required_input=true so the optimizer refuses the scenario instead of inventing a number.",
   "sources": {
-    "fao56": {
-      "name": "FAO Irrigation and Drainage Paper 56 - Crop evapotranspiration (Allen et al., 1998), Tables 11-12",
-      "url": "https://www.fao.org/4/x0490e/x0490e00.htm",
-      "type": "scientific_model",
-      "status": "transcribed_verify",
-      "retrieved": "2026-09-25",
-      "note": "Kc values and stage lengths transcribed by the developer from the publication; re-check against the tables before relying on them."
-    },
-    "fao29": {
-      "name": "FAO Irrigation and Drainage Paper 29 rev.1 - Water quality for agriculture (Ayers & Westcot), Table 4 (Maas-Hoffman salinity thresholds)",
-      "url": "https://www.fao.org/4/t0234e/t0234e00.htm",
-      "type": "scientific_model",
-      "status": "transcribed_verify",
-      "retrieved": "2026-09-25",
-      "note": "ECe threshold and slope transcribed from the publication; re-check before relying on them."
-    },
-    "qatar_od_crops": {
-      "name": "State of Qatar Open Data - Production Area and Average Yield of Crops (open field)",
-      "url": "https://www.data.gov.qa/explore/dataset/production-area-and-average-yield-of-crops/",
-      "type": "official_dataset",
+    "qatar_cadastre": {
+      "name": "State of Qatar - Centre for GIS, approved cadastral plot boundaries (CadastrePlots FeatureServer, layer 0)",
+      "url": "https://services.gisqatar.org.qa/server/rest/services/Vector/CadastrePlots/FeatureServer/0",
+      "type": "official_qatar",
       "status": "live_adapter",
       "retrieved": "runtime",
-      "note": "Retrieved at run time through the Opendatasoft API. Records whose reported yield disagrees with production/area are rejected (see adapter)."
+      "note": "Public ArcGIS Query endpoint, no authentication. 254,289 plots. Native SR EPSG:2932 (QND 1995 / Qatar National Grid); queried with outSR=4326 and f=geojson. PDAREA is the officially registered plot area in m2."
+    },
+    "qatar_od_crops": {
+      "name": "State of Qatar Open Data - Production, Area and Average Yield of Crops (open field)",
+      "url": "https://www.data.gov.qa/explore/dataset/production-area-and-average-yield-of-crops/",
+      "type": "official_qatar",
+      "status": "live_adapter",
+      "retrieved": "runtime",
+      "note": "Opendatasoft Explore API v2.1. Yield is recomputed as production/area; records disagreeing with the reported yield by more than 10% or that are robust outliers are rejected, with the reason kept. At least 3 usable years are required."
     },
     "qatar_od_greenhouse": {
       "name": "State of Qatar Open Data - Cropped area & production of crops in greenhouses",
       "url": "https://www.data.gov.qa/explore/dataset/cropped-area-and-production-of-crops-in-greenhouses/",
-      "type": "official_dataset",
+      "type": "official_qatar",
       "status": "live_adapter",
       "retrieved": "runtime",
       "note": "Greenhouse yield = production / cropped area. Covers tomato, cucumber and sweet pepper only."
     },
+    "nasa_power": {
+      "name": "NASA POWER daily point API (AG community)",
+      "url": "https://power.larc.nasa.gov/docs/services/api/temporal/daily/",
+      "type": "open_dataset",
+      "status": "live_adapter",
+      "retrieved": "runtime",
+      "note": "T2M, T2M_MAX, T2M_MIN, ALLSKY_SFC_SW_DWN, RH2M, WS2M, PRECTOTCORR. Meteorology from MERRA-2 at 0.5 x 0.625 deg, solar from CERES at 1 deg. Queries are snapped to the native cell centre: this is a reanalysis grid, NOT a plot-level sensor."
+    },
+    "soilgrids": {
+      "name": "ISRIC SoilGrids 2.0 via the ISRIC Web Coverage Service (WCS)",
+      "url": "https://www.isric.org/explore/soilgrids",
+      "type": "open_dataset",
+      "status": "live_adapter",
+      "retrieved": "runtime",
+      "note": "250 m global soil property grids, CC-BY 4.0. pH, sand, silt, clay. The paused SoilGrids REST API is deliberately NOT used. SoilGrids has NO soil salinity / EC layer."
+    },
     "aquacrop": {
-      "name": "FAO AquaCrop (aquacrop Python package 3.1.0), built-in Tomato crop file",
+      "name": "FAO AquaCrop, aquacrop Python package v3.1.0, bundled Tomato crop file",
       "url": "https://github.com/aquacropos/aquacrop",
       "type": "scientific_model",
       "status": "live_model",
       "retrieved": "runtime",
-      "note": "Applied to open-field tomato only: the only MVP crop with a calibrated crop file shipped with AquaCrop."
+      "note": "Applied ONLY to open-field tomato - the only MVP crop with a calibrated crop file in the package. AquaCrop does not represent greenhouse, hydroponic or vertical systems and is not applied to them."
     },
-    "proto_temp": {
-      "name": "Typical agronomic temperature limits (developer estimate, not cultivar specific)",
+    "fao56": {
+      "name": "FAO Irrigation and Drainage Paper 56 - Crop evapotranspiration (Allen et al., 1998)",
+      "url": "https://www.fao.org/4/x0490e/x0490e00.htm",
+      "type": "scientific_model",
+      "status": "transcribed_verify",
+      "retrieved": "2026-09-25",
+      "note": "Penman-Monteith ET0 (eq. 6) is implemented from the publication. Kc values and stage lengths (Tables 11-12) were transcribed by the developer and should be re-checked against the tables."
+    },
+    "fao29": {
+      "name": "FAO Irrigation and Drainage Paper 29 rev.1 - Water quality for agriculture (Ayers & Westcot), Maas-Hoffman salinity coefficients",
+      "url": "https://www.fao.org/4/t0234e/t0234e00.htm",
+      "type": "scientific_model",
+      "status": "transcribed_verify",
+      "retrieved": "2026-09-25",
+      "note": "ECe threshold and slope transcribed from the publication by the developer; re-check before relying on them."
+    },
+    "karanisa2021": {
+      "name": "Karanisa, Amato, Richer, Abdul Majid, Skelhorn & Sayadi (2021), Agricultural Production in Qatar's Hot Arid Climate, Sustainability 13(7):4059",
+      "url": "https://doi.org/10.3390/su13074059",
+      "type": "peer_reviewed",
+      "status": "retrieved_verified",
+      "retrieved": "2026-09-25",
+      "note": "Open-access review of Qatari agriculture, retrieved and read during implementation. It documents Qatar's growing season, protected-agriculture context and groundwater salinity problem. It does NOT contain per-m2 capital or operating costs, so it is not used as a cost source."
+    },
+    "kahramaa_tariff": {
+      "name": "Kahramaa (Qatar General Electricity & Water Corporation) - Productive Farms tariff category",
+      "url": "https://www.km.qa/CustomerService/Pages/Tariff.aspx",
+      "type": "official_qatar",
+      "status": "category_confirmed_rate_not_machine_readable",
+      "retrieved": "2026-09-25",
+      "note": "Kahramaa publishes a distinct 'Productive Farms' customer category, confirmed on the official tariff page. The rates themselves are only available through an interactive calculator and are not machine-readable, so the unit prices must be entered by the user from their own Kahramaa bill."
+    },
+    "required": {
+      "name": "Required input - no defensible source located",
       "url": "",
-      "type": "prototype_assumption",
-      "status": "placeholder",
-      "note": "Used only to decide which months a crop can be grown. Replace with cultivar-specific limits."
-    },
-    "proto_cycle": {
-      "name": "Crop cycle length, cycles-per-year cap and inputs cost (developer estimate)",
-      "url": "",
-      "type": "prototype_assumption",
-      "status": "placeholder",
-      "note": "Order-of-magnitude values pending a Qatar agronomist review."
-    },
-    "proto_price": {
-      "name": "Farm-gate selling price (developer estimate; no Qatar price dataset integrated)",
-      "url": "",
-      "type": "prototype_assumption",
-      "status": "placeholder",
-      "note": "Users are expected to overwrite these with their own prices."
-    },
-    "proto_yield": {
-      "name": "Controlled-environment yield per cycle (order of magnitude from published ranges; not verified for Qatar)",
-      "url": "",
-      "type": "prototype_assumption",
-      "status": "placeholder",
-      "note": "Used where no Qatar Open Data / AquaCrop value exists (soilless systems, greenhouse lettuce/strawberry)."
-    },
-    "proto_capex": {
-      "name": "Capital cost per m2 and fixed items (developer estimate; no supplier quotes)",
-      "url": "",
-      "type": "prototype_assumption",
-      "status": "placeholder",
-      "note": "Replace with supplier quotations."
-    },
-    "proto_opex": {
-      "name": "Annual operating cost excluding energy and water (developer estimate)",
-      "url": "",
-      "type": "prototype_assumption",
-      "status": "placeholder",
-      "note": "Labour, maintenance, consumables."
-    },
-    "proto_energy": {
-      "name": "Electricity use per m2 (developer estimate)",
-      "url": "",
-      "type": "prototype_assumption",
-      "status": "placeholder",
-      "note": "Cooling, lighting, pumping. Seasonal shape is derived from NASA POWER temperatures."
-    },
-    "proto_water": {
-      "name": "Water coefficient relative to open-field crop water demand (developer estimate)",
-      "url": "",
-      "type": "prototype_assumption",
-      "status": "placeholder",
-      "note": "Relative to FAO-56 ETc / AquaCrop irrigation; recirculating systems use less."
-    },
-    "proto_infra": {
-      "name": "Shared infrastructure fixed cost (developer estimate)",
-      "url": "",
-      "type": "prototype_assumption",
-      "status": "placeholder",
-      "note": "Paid once per plot no matter how many production systems use it."
-    },
-    "proto_tariff": {
-      "name": "Electricity and water unit prices (developer estimate; verify with the Kahramaa tariff)",
-      "url": "https://www.km.qa/",
-      "type": "prototype_assumption",
-      "status": "placeholder",
-      "note": "Not verified against the current Kahramaa tariff."
-    },
-    "proto_scenario": {
-      "name": "Scenario multipliers (definition of the what-if, not a forecast)",
-      "url": "",
-      "type": "prototype_assumption",
-      "status": "placeholder",
-      "note": "Editable in data/scenarios.json."
-    },
-    "proto_limits": {
-      "name": "Solver planning defaults (peak factor, access share, utilisation floor)",
-      "url": "",
-      "type": "prototype_assumption",
-      "status": "placeholder",
-      "note": "Modelling choices exposed in the UI."
+      "type": "user_supplied",
+      "status": "required",
+      "retrieved": "n/a",
+      "note": "No official Qatar or peer-reviewed value was found for this parameter during implementation. The optimizer refuses any crop x technique that depends on it until a value is entered."
     },
     "user": {
       "name": "User supplied",
       "url": "",
       "type": "user_supplied",
       "status": "user",
+      "retrieved": "n/a",
       "note": "Entered by the user in the interface."
+    },
+    "planning_profile": {
+      "name": "Estimate - unverified planning figure accepted by the user",
+      "url": "",
+      "type": "unverified",
+      "status": "unverified_accepted",
+      "retrieved": "n/a",
+      "note": "Order-of-magnitude figures used ONLY when the user ticks 'Use unverified planning defaults'. They are not sourced and must not be presented as evidence. Figures for Qatar greenhouse CapEx were supplied by the project owner citing a Qatar greenhouse study; the underlying publication could NOT be located or verified during implementation (the likely source, Lahlou et al. 2025, Cleaner and Circular Bioeconomy, is paywalled)."
+    },
+    "model_choice": {
+      "name": "Explicit modelling choice (documented in the README, not measured data)",
+      "url": "",
+      "type": "scientific_model",
+      "status": "modelling_choice",
+      "retrieved": "2026-09-25",
+      "note": "A structural decision of the model, such as the planning horizon or how a monthly cap is derived from an annual limit. Not a measured quantity."
+    },
+    "osm": {
+      "name": "OpenStreetMap via Overpass API",
+      "url": "https://www.openstreetmap.org/copyright",
+      "type": "open_dataset",
+      "status": "live_adapter",
+      "retrieved": "runtime",
+      "note": "(c) OpenStreetMap contributors, ODbL. Used only for nearest-market context shown to the user; it is NOT an optimizer input."
     }
   }
 }

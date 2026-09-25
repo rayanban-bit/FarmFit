@@ -85,7 +85,14 @@ def build_schedule(clim: dict, temp: dict, cooling_delta: float, heating_delta: 
 
 def monthly_water_kc(clim: dict, sched: dict, stage_days: list[float], kc: list[float], irrigation_eff: float,
                      water_coeff: float, extra_m3_m2_year: float, use_rain: bool, rain_fraction: float) -> list[float]:
-    """m3/m2 per calendar month for the whole operating year (all cycles)."""
+    """m3/m2 per calendar month for the whole operating year (all cycles).
+
+    irrigation_eff is the fraction of applied water that reaches the crop, so it must be > 0: at zero the
+    water needed to deliver any net requirement is infinite, which is physically meaningless rather than a
+    number to approximate. Callers validate this up front; the check here documents the precondition.
+    """
+    if not irrigation_eff > 0:
+        raise ValueError(f"irrigation efficiency must be greater than 0, got {irrigation_eff}")
     water = [0.0] * 12
     stages = scale_stages(stage_days, sched["cycle_days"])
     month_cursor = 0  # index into run_months

@@ -52,6 +52,11 @@ from ortools.linear_solver import pywraplp
 
 MONTHS = 12
 
+# Pure floating-point comparison tolerances. They decide when a quantity *is* zero; they never replace a
+# zero by a non-zero value and never enter the objective or a constraint.
+CAPEX_TOL = 1e-6   # QAR
+AREA_TOL = 1e-6    # m2
+
 
 @dataclass
 class PlotIn:
@@ -107,7 +112,12 @@ class Limits:
     budget: float = float("inf")
     water_year: float = float("inf")
     energy_year: float = float("inf")
-    monthly_peak_factor: float = 1.5
+    # Delivery-rate limits: the most that can physically be drawn in ONE month (pump, well or contract
+    # capacity). Infinity means the only limit is the annual volume, which is what an annual quota means.
+    # Earlier versions derived a monthly cap as water_year * factor / 12, which invented a rate limit the
+    # user never stated and, for seasonal crops, dominated every other constraint.
+    water_month_max: float = float("inf")
+    energy_month_max: float = float("inf")
     min_utilisation: float = 0.0
     min_block_m2: float = 0.0
     horizon_years: int = 5
@@ -115,10 +125,17 @@ class Limits:
     max_crop_share: float = 1.0
 
     def water_cap_month(self) -> float:
-        return self.water_year * self.monthly_peak_factor / MONTHS
+        """A single month can never exceed the annual volume, nor the stated delivery capacity."""
+        return min(self.water_month_max, self.water_year)
 
     def energy_cap_month(self) -> float:
-        return self.energy_year * self.monthly_peak_factor / MONTHS
+        return min(self.energy_month_max, self.energy_year)
+
+    def has_water_rate_limit(self) -> bool:
+        return self.water_month_max < self.water_year
+
+    def has_energy_rate_limit(self) -> bool:
+        return self.energy_month_max < self.energy_year
 
 
 @dataclass
@@ -174,6 +191,9 @@ class Solution:
     solver: dict
     warnings: list[str] = field(default_factory=list)
     utilisation_floor_used: float = 0.0
+    # Why the ratio objective ended the way it did: "optimal" | "no_viable_investment" |
+    # "zero_capex_unbounded" | "zero_capex_undefined" | "not_applicable" (net_profit objective).
+    ratio_outcome: str = "optimal"
 
 
 # ------------------------------------------------------------------------------------------------
@@ -376,13 +396,16 @@ class _Model:
         e = e + sum(p.groups[g].fixed_capex * v for (pid, g), v in self.y.items())
         return e
 
-    def set_objective(self, lam: float | None, require_capex: bool) -> None:
+    def set_objective(self, lam: float | None = None) -> None:
+        """Maximise N = H*Profit - CapEx, or the Dinkelbach surrogate N - lambda*CapEx.
+
+        No artificial lower bound is placed on CapEx. An earlier version added `CapEx >= 1` to dodge the
+        lambda = N/CapEx division; that silently removed every zero-investment plan from the feasible set
+        and so changed the problem being solved. Zero-CapEx solutions are now handled explicitly in `_run`.
+        """
         h = self.problem.limits.horizon_years
         n_expr = h * self.profit - self.capex
-        obj = n_expr if lam is None else n_expr - lam * self.capex
-        self.s.Maximize(obj)
-        if require_capex:
-            self._capex_floor = self.s.Add(self.capex >= 1.0)
+        self.s.Maximize(n_expr if lam is None else n_expr - lam * self.capex)
 
     def solve(self):
         params = pywraplp.MPSolverParameters()
@@ -427,9 +450,11 @@ def _run(problem: Problem, util_floor: float, on_progress, time_limit_s: float, 
     info = {"backend": "OR-Tools pywraplp / SCIP", "method": "", "n_binary": 0, "n_vars": 0, "n_constraints": 0}
     best_alloc: dict = {}
 
+    ratio_outcome = "not_applicable"
+
     if lim.objective == "net_profit":
         m = _Model(problem, util_floor, time_limit_s)
-        m.set_objective(None, require_capex=False)
+        m.set_objective(None)
         status, ms = m.solve()
         info.update(method="single MIP: maximise 5-year net cash flow", n_binary=m.n_int, n_vars=m.n_vars, n_constraints=m.n_cons)
         if status not in (pywraplp.Solver.OPTIMAL, pywraplp.Solver.FEASIBLE):
@@ -441,18 +466,29 @@ def _run(problem: Problem, util_floor: float, on_progress, time_limit_s: float, 
             on_progress(iterations[-1])
         best_alloc, sol_status = alloc, _STATUS.get(status, "?")
     else:
+        # ---------------------------------------------------------------- Dinkelbach on ROI = N / CapEx
+        # F(lambda) = max_x N(x) - lambda*CapEx(x) is convex, piecewise linear and decreasing, so the
+        # iteration below is Newton's method on F(lambda) = 0 and converges finitely to lambda* = max ROI.
+        # The update lambda = N/CapEx is undefined when CapEx = 0, which is a real possibility (a plan that
+        # produces without capital investment), not a numerical artefact. Rather than regularising it away we
+        # classify it, because the ratio genuinely has no finite maximum in that case:
+        #     CapEx = 0, no production   -> the best plan is to build nothing: no viable investment exists
+        #     CapEx = 0, N > 0           -> ROI = N/0 is unbounded above; no finite optimum
+        #     CapEx = 0, N = 0           -> ROI = 0/0 is undefined
+        # In each case the loop stops immediately and says so; it never divides by zero and never spins.
         lam = 0.0
         sol_status = "NOT_SOLVED"
         info["method"] = "Dinkelbach: iterate max N - lambda*CapEx (MIP) until F(lambda) <= tol"
         converged = False
+        best_ratio: float | None = None
         for k in range(max_iter):
             m = _Model(problem, util_floor, time_limit_s)
-            m.set_objective(lam, require_capex=True)
+            m.set_objective(lam)
             status, ms = m.solve()
             info.update(n_binary=m.n_int, n_vars=m.n_vars, n_constraints=m.n_cons)
             if status not in (pywraplp.Solver.OPTIMAL, pywraplp.Solver.FEASIBLE):
                 if k == 0:
-                    return None
+                    return None  # the constraint set itself is empty
                 break
             alloc = _clean(problem, m.extract())
             ev = evaluate(problem, alloc)
@@ -462,29 +498,77 @@ def _run(problem: Problem, util_floor: float, on_progress, time_limit_s: float, 
             iterations.append(it)
             if on_progress:
                 on_progress(it)
-            if d <= 0:
-                return None
-            best_alloc = alloc
+
+            converged_here = f <= tol * max(1.0, abs(n), d)
+
+            if d <= CAPEX_TOL:
+                # At the Dinkelbach root F(lambda) = 0 the "build nothing" point (N = 0, CapEx = 0) ties the
+                # optimal portfolio, so the solver may legitimately return it. That is convergence, not a
+                # degenerate answer: keep the incumbent that produced this lambda.
+                if best_ratio is not None and converged_here:
+                    converged = True
+                    ratio_outcome = "optimal"
+                    break
+                if ev["area_m2"] <= AREA_TOL:
+                    # Maximising N chose to allocate nothing, i.e. every investment the constraints allow
+                    # has a non-positive 5-year net cash flow. There is nothing to compute a return on.
+                    ratio_outcome = "no_viable_investment"
+                    sol_status = "NO_VIABLE_INVESTMENT"
+                    best_alloc = {}
+                else:
+                    # Production with no capital: the ROI ratio has no finite maximum.
+                    ratio_outcome = "zero_capex_unbounded" if n > CAPEX_TOL else "zero_capex_undefined"
+                    sol_status = "ZERO_CAPEX"
+                    best_alloc = alloc
+                converged = True
+                break
+
+            ratio = n / d
+            if best_ratio is None or ratio > best_ratio:
+                best_ratio, best_alloc = ratio, alloc
             sol_status = _STATUS.get(status, "?")
-            if f <= tol * max(1.0, d):
+            if converged_here:
                 converged = True
+                ratio_outcome = "optimal"
                 break
-            new_lam = n / d
-            if k > 0 and new_lam <= lam + 1e-12:
+            if k > 0 and ratio <= lam + 1e-12:  # lambda can no longer increase: at the root
                 converged = True
+                ratio_outcome = "optimal"
                 break
-            lam = new_lam
+            lam = ratio
         if not converged:
             sol_status = "MAX_ITER"
-        elif sol_status == "FEASIBLE":
-            sol_status = "FEASIBLE"
+            ratio_outcome = "max_iterations"
 
     builds, infra = derive_structure(problem, best_alloc)
     metrics = evaluate(problem, best_alloc)
     info["wall_ms"] = round((time.perf_counter() - t_start) * 1000, 1)
     info["dinkelbach_iterations"] = len(iterations) if lim.objective == "roi" else None
     violations = check_feasible(problem, best_alloc, util_floor)
-    sol = Solution(sol_status, best_alloc, builds, infra, metrics, iterations, info, utilisation_floor_used=util_floor)
+    sol = Solution(sol_status, best_alloc, builds, infra, metrics, iterations, info,
+                   utilisation_floor_used=util_floor, ratio_outcome=ratio_outcome)
+    if ratio_outcome == "no_viable_investment":
+        sol.warnings.append(
+            "No viable investment solution: within these limits every possible farm has a 5-year net cash flow "
+            "of zero or less, so the optimizer allocated no land. A return on investment cannot be defined. "
+            "Check the selling prices, the CapEx and OpEx figures, and the available budget, water and energy."
+        )
+    elif ratio_outcome == "zero_capex_unbounded":
+        sol.warnings.append(
+            "Every selected system was given a capital cost of zero, so this plan produces without any "
+            "investment. Return on investment is the ratio of net gain to CapEx and is unbounded when CapEx "
+            "is zero, so no ROI figure is shown. The plan below maximises 5-year net cash flow instead. "
+            "Enter real CapEx figures to obtain an ROI."
+        )
+    elif ratio_outcome == "zero_capex_undefined":
+        sol.warnings.append(
+            "This plan has zero CapEx and zero 5-year net cash flow, so ROI is 0/0 and undefined. "
+            "Enter real CapEx and price figures to obtain an ROI."
+        )
+    elif ratio_outcome == "max_iterations":
+        sol.warnings.append(
+            f"Dinkelbach did not converge within {max_iter} iterations; the best portfolio found is shown."
+        )
     if violations:
         sol.warnings.append("Solver self-check found violated constraints: " + "; ".join(violations))
         sol.status = "CHECK_FAILED"

@@ -51,5 +51,9 @@ desktop.ini
 *.tmp
 tmp/
 
-# NOTE: data/cache/ is committed on purpose (~1 MB). It holds public API responses (NASA POWER, Qatar Open Data,
-# SoilGrids, AquaCrop results, OSM) with retrieval dates so the demo also works offline. It contains no credentials.
+# data/cache/ is committed on purpose. It holds public API responses (NASA POWER, Qatar Open Data, SoilGrids,
+# AquaCrop, OSM, cadastral layer metadata) with retrieval dates, so the demo works offline. No credentials.
+# Cadastral *viewport* caches are excluded: they are keyed by an arbitrary map bounding box, so they are test
+# artifacts that never repeat for another user, and they account for 16 MB of a 17 MB cache directory.
+data/cache/cadastre_bbox_*.json
+data/cache/cadastre_ids_*.json

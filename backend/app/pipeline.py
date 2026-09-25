@@ -15,6 +15,8 @@ from dataclasses import dataclass, field
 from typing import Callable
 
 from . import aquacrop_model, baseline as baseline_mod, catalog as catalog_mod, climate, crop_model, finance, optimizer
+from .datapanel import build_data_panel
+from .limiting import diagnose
 from .adapters import nasa_power, osm, qatar_open_data as qod, soilgrids
 from .adapters.base import AdapterUnavailable
 from .optimizer import GroupIn, Limits, Option, PlotIn, Problem, TechIn
@@ -37,6 +39,8 @@ class PlotCtx:
     geometry: dict
     geometry_source: str
     area_m2: float
+    geodesic_area_m2: float
+    registered_area_m2: float | None
     usable_m2: float
     lon: float
     lat: float
@@ -62,16 +66,20 @@ class Ctx:
     stats_gh: dict = field(default_factory=dict)
     ref_df: object | None = None
     notes: list[str] = field(default_factory=list)
+    missing_inputs: list[dict] = field(default_factory=list)
 
 
 # ------------------------------------------------------------------------------------------------
 # 1. data preparation
 # ------------------------------------------------------------------------------------------------
 def prepare_context(req: OptimizeRequest, emit: Emit = _noop) -> Ctx:
-    cat = catalog_mod.apply_overrides(catalog_mod.base_catalog(), req.overrides)
+    cat, missing = catalog_mod.resolve(catalog_mod.base_catalog(), req.overrides, req.accept_planning_profile)
     problems = catalog_mod.validate(cat)
     if problems:
         raise ValueError("Catalog inconsistent: " + "; ".join(problems))
+    bad_values = catalog_mod.validate_values(cat)
+    if bad_values:
+        raise ValueError("Invalid input value(s): " + "; ".join(bad_values))
     for cid in req.crops:
         if cid not in cat["crops"]:
             raise ValueError(f"Unknown crop '{cid}'")
@@ -82,11 +90,18 @@ def prepare_context(req: OptimizeRequest, emit: Emit = _noop) -> Ctx:
     plots: list[PlotCtx] = []
     access = req.constraints.access_fraction
     for p in req.plots:
-        area = geometry_area_m2(p.geometry)
+        geodesic = geometry_area_m2(p.geometry)
+        # The officially registered cadastral area (PDAREA) is authoritative when the plot came from the
+        # live cadastre; the geodesic area recomputed from the boundary is kept alongside it for comparison.
+        area = float(p.registered_area_m2) if p.registered_area_m2 else geodesic
         lon, lat = geometry_centroid(p.geometry)
-        plots.append(PlotCtx(p.id, p.name or p.id, p.geometry, p.source or "user supplied geometry", area, area * (1 - access), lon, lat))
+        plots.append(PlotCtx(p.id, p.name or p.id, p.geometry, p.source or "user supplied geometry", area, geodesic,
+                             p.registered_area_m2, area * (1 - access), lon, lat))
     emit({"event": "stage", "name": "plots", "message": f"{len(plots)} plot(s), {sum(p.area_m2 for p in plots):,.0f} m2 total (spherical area from geometry)"})
-    ctx = Ctx(req, cat, plots)
+    ctx = Ctx(req, cat, plots, missing_inputs=missing)
+    if missing:
+        emit({"event": "stage", "name": "inputs", "message":
+              f"{len(missing)} required input(s) still unresolved - any crop x technique that needs one will be excluded, not guessed"})
 
     # climate + soil (+ optional OSM context) per plot, in parallel
     def load_plot(pc: PlotCtx) -> None:
@@ -144,7 +159,8 @@ def prepare_context(req: OptimizeRequest, emit: Emit = _noop) -> Ctx:
 MIN_OBS = 3
 
 
-def _tariffs(ctx: Ctx, scenario: dict) -> tuple[float, float, str, str]:
+def _tariffs(ctx: Ctx, scenario: dict) -> tuple[float | None, float | None, str, str]:
+    """Electricity and water unit prices. None means the required input is unresolved."""
     d = ctx.cat["defaults"]
     e = ctx.req.electricity_qar_kwh
     w = ctx.req.water_qar_m3
@@ -152,7 +168,7 @@ def _tariffs(ctx: Ctx, scenario: dict) -> tuple[float, float, str, str]:
     w_src = "user" if w is not None else d["water_qar_m3"]["src"]
     e = e if e is not None else d["electricity_qar_kwh"]["value"]
     w = w if w is not None else d["water_qar_m3"]["value"]
-    return e * scenario["electricity_price_factor"], w, e_src, w_src
+    return (None if e is None else e * scenario["electricity_price_factor"]), w, e_src, w_src
 
 
 def _yield_for(ctx: Ctx, pc: PlotCtx, cid: str, tid: str, sched: dict | None) -> dict | None | str:
@@ -202,10 +218,17 @@ def build_options(ctx: Ctx, scenario_id: str) -> tuple[list[Option], list[dict],
                 tech = cat["techniques"][tid]
                 label = {"plot": pc.id, "crop": cid, "technique": tid}
                 if cid not in tech["compatible_crops"]:
-                    excluded.append({**label, "reason": "incompatible crop x technique combination"})
+                    excluded.append({**label, "kind": "incompatible", "reason": "incompatible crop x technique combination"})
                     continue
                 if pc.clim is None:
-                    excluded.append({**label, "reason": "no climate data for this plot (NASA POWER unavailable and no cache)"})
+                    excluded.append({**label, "kind": "data", "reason": "no climate data for this plot (NASA POWER unavailable and no cache)"})
+                    continue
+                # REQUIRED INPUTS: refuse the scenario rather than invent a number for it.
+                need = catalog_mod.missing_for(cat, cid, tid)
+                if need:
+                    excluded.append({**label, "kind": "required_input",
+                                     "reason": "Required input unavailable - enter value: " + "; ".join(n["label"] for n in need),
+                                     "missing": need})
                     continue
                 y0 = crop["yields"][tid]
                 cycle_days = y0.get("cycle_days") or crop["cycle_days"]["value"]
@@ -213,11 +236,11 @@ def build_options(ctx: Ctx, scenario_id: str) -> tuple[list[Option], list[dict],
                     pc.clim, crop["temp_limits_c"]["value"], tech["cooling_delta_c"]["value"], tech["heating_delta_c"]["value"],
                     tech["climate_controlled"], cycle_days, crop["turnaround_days"]["value"], y0["max_cycles"])
                 if sched is None:
-                    excluded.append({**label, "reason": "no thermally feasible growing window (NASA POWER monthly temperatures vs crop limits)"})
+                    excluded.append({**label, "kind": "climate", "reason": "no thermally feasible growing window (monthly NASA POWER temperatures vs the crop's limits)"})
                     continue
                 y = _yield_for(ctx, pc, cid, tid, sched)
                 if isinstance(y, str):
-                    excluded.append({**label, "reason": y})
+                    excluded.append({**label, "kind": "data", "reason": y})
                     continue
                 cycles = min(sched["cycles"], y["max_cycles"])
                 sal = 1.0
@@ -241,15 +264,24 @@ def build_options(ctx: Ctx, scenario_id: str) -> tuple[list[Option], list[dict],
                                                         tech["extra_water_m3_m2_year"]["value"], bool(tech.get("rain_exposed")), rain_frac)
                 energy = crop_model.monthly_energy(pc.clim, sched, tech["energy_kwh_m2_year"]["value"], tech["cooling_share"]["value"])
                 price = req.prices.get(cid, crop["price_qar_kg"]["value"])
+                # --- OpEx built from components, never a single unsourced QAR/m2/year figure
+                comp = tech["opex_components"]
+                labour = comp["labour_qar_m2_year"]["value"]
+                maintenance = comp["maintenance_qar_m2_year"]["value"]
+                seedlings = crop["seedlings_qar_m2_cycle"]["value"] * cycles
+                nutrients = crop["nutrients_qar_m2_cycle"]["value"] * cycles
                 water_cost = sum(water) * w_price
                 energy_cost = sum(energy) * e_price
-                opex = tech["opex_qar_m2_year"]["value"] + crop["inputs_qar_m2_cycle"]["value"] * cycles + water_cost + energy_cost
+                opex_breakdown = {"labour": labour, "maintenance": maintenance, "seedlings": seedlings,
+                                  "nutrients": nutrients, "water": water_cost, "electricity": energy_cost}
+                opex = sum(opex_breakdown.values())
                 opt = Option(cid, tid, rev_m2=yield_year * price, opex_m2=opex, capex_m2=tech["capex_qar_m2"]["value"], water_m=water, energy_m=energy,
                              yield_kg_m2=yield_year, water_cost_m2=water_cost, energy_cost_m2=energy_cost, plot=pc.id)
                 options.append(opt)
                 detail[(pc.id, cid, tid)] = {"cycles": cycles, "salinity_factor": sal, "price": price, "yield_kg_m2_cycle": y["kg_m2_cycle"],
                                              "yield_kind": y["kind"], "yield_src": y["src"], "yield_note": y.get("note", ""), "sched": sched,
-                                             "water_method": water_method, "y": y}
+                                             "water_method": water_method, "y": y, "opex_breakdown": opex_breakdown,
+                                             "capex_m2": tech["capex_qar_m2"]["value"]}
     return options, excluded, detail
 
 
@@ -258,11 +290,18 @@ def build_problem(ctx: Ctx, scenario_id: str) -> tuple[Problem, list[dict], dict
     c = req.constraints
     scenario = cat["scenarios"][scenario_id]
     options, excluded, detail = build_options(ctx, scenario_id)
+    # Only techniques that actually produced an option are modelled: the rest were excluded for a stated
+    # reason (incompatible, no growing window, or a required input with no defensible source).
+    used_techs = sorted({o.technique for o in options})
     techs = {tid: TechIn(tid, cat["techniques"][tid]["min_area_m2"]["value"], cat["techniques"][tid]["fixed_capex_qar"]["value"], 0.0,
-                         list(cat["techniques"][tid]["requires"])) for tid in req.techniques}
-    groups = {gid: GroupIn(gid, g["fixed_capex_qar"]["value"], g["fixed_opex_qar_year"]["value"]) for gid, g in cat["groups"].items()}
+                         list(cat["techniques"][tid]["requires"])) for tid in used_techs}
+    used_groups = sorted({g for tid in used_techs for g in cat["techniques"][tid]["requires"]})
+    groups = {gid: GroupIn(gid, cat["groups"][gid]["fixed_capex_qar"]["value"], cat["groups"][gid]["fixed_opex_qar_year"]["value"])
+              for gid in used_groups}
     lim = Limits(budget=c.budget_qar, water_year=c.water_m3_year * scenario["water_factor"], energy_year=c.energy_kwh_year,
-                 monthly_peak_factor=c.monthly_peak_factor, min_utilisation=c.min_land_utilisation, min_block_m2=c.min_block_m2,
+                 water_month_max=c.water_peak_m3_month if c.water_peak_m3_month else float("inf"),
+                 energy_month_max=c.energy_peak_kwh_month if c.energy_peak_kwh_month else float("inf"),
+                 min_utilisation=c.min_land_utilisation, min_block_m2=c.min_block_m2,
                  horizon_years=c.horizon_years, objective=c.objective, max_crop_share=c.max_crop_share)
     problem = Problem([PlotIn(p.id, p.usable_m2) for p in ctx.plots], options, techs, groups, lim)
     return problem, excluded, detail
@@ -351,7 +390,8 @@ def assemble(ctx: Ctx, scenario_id: str, problem: Problem, sol: optimizer.Soluti
                            "capex_saved_by_sharing": fg * (len(users) - 1) if len(users) > 1 else 0.0})
         plot_rows.append({"plot_id": pc.id, "name": pc.name, "area_m2": pc.area_m2, "usable_m2": pc.usable_m2, "access_m2": pc.area_m2 - pc.usable_m2,
                           "allocated_m2": allocated, "unallocated_m2": pc.usable_m2 - allocated, "builds": builds, "infrastructure": shared,
-                          "centroid": [pc.lon, pc.lat], "geometry_source": pc.geometry_source})
+                          "centroid": [pc.lon, pc.lat], "geometry_source": pc.geometry_source,
+                          "registered_area_m2": pc.registered_area_m2, "geodesic_area_m2": pc.geodesic_area_m2})
     summary = _summary(problem, sol.metrics)
     baseline_out = comparison = None
     baseline_free_out = comparison_free = None
@@ -364,8 +404,8 @@ def assemble(ctx: Ctx, scenario_id: str, problem: Problem, sol: optimizer.Soluti
     ev = sol.metrics
     lim = problem.limits
     monthly = {"months": MONTH_NAMES, "water_m3": ev["water_month"], "energy_kwh": ev["energy_month"],
-               "water_cap_m3": lim.water_cap_month() if lim.water_year < float("inf") else None,
-               "energy_cap_kwh": lim.energy_cap_month() if lim.energy_year < float("inf") else None}
+               "water_cap_m3": lim.water_cap_month() if lim.has_water_rate_limit() else None,
+               "energy_cap_kwh": lim.energy_cap_month() if lim.has_energy_rate_limit() else None}
     opt_table = []
     for o in problem.options:
         profit_m2 = o.rev_m2 - o.opex_m2
@@ -378,7 +418,7 @@ def assemble(ctx: Ctx, scenario_id: str, problem: Problem, sol: optimizer.Soluti
         "status": sol.status,
         "objective": lim.objective,
         "solver": {**sol.solver, "iterations": [it.to_dict() for it in sol.iterations], "utilisation_floor_requested": lim.min_utilisation,
-                   "utilisation_floor_used": sol.utilisation_floor_used},
+                   "utilisation_floor_used": sol.utilisation_floor_used, "ratio_outcome": sol.ratio_outcome},
         "summary": summary,
         "portfolio": portfolio,
         "plots": plot_rows,
@@ -388,14 +428,19 @@ def assemble(ctx: Ctx, scenario_id: str, problem: Problem, sol: optimizer.Soluti
         "comparison_free": comparison_free,
         "monthly": monthly,
         "limits": {"budget_qar": lim.budget, "water_m3_year": lim.water_year, "energy_kwh_year": lim.energy_year,
-                   "monthly_peak_factor": lim.monthly_peak_factor, "usable_m2": sum(p.usable_m2 for p in ctx.plots),
+                   "water_peak_m3_month": None if lim.water_month_max == float("inf") else lim.water_month_max,
+                   "energy_peak_kwh_month": None if lim.energy_month_max == float("inf") else lim.energy_month_max,
+                   "usable_m2": sum(p.usable_m2 for p in ctx.plots),
                    "total_m2": sum(p.area_m2 for p in ctx.plots)},
         "options": opt_table,
         "excluded": excluded,
+        "limiting": diagnose(problem, sol, sum(p.usable_m2 for p in ctx.plots)),
         "warnings": list(sol.warnings) + list(ctx.notes),
+        "missing_inputs": ctx.missing_inputs,
+        "accepted_planning_profile": ctx.req.accept_planning_profile,
     }
     out["explanations"] = explain(out, problem, sol, cat, detail) if sol.alloc else []
-    out["data_panel"] = [r.to_dict() for r in build_data_panel(ctx, problem, detail, scenario_id, sol)]
+    out["data_panel"] = [r.to_dict() for r in build_data_panel(ctx, problem, detail, scenario_id, sol, _tariffs(ctx, cat["scenarios"][scenario_id]))]
     if with_context:
         out["context"] = [{"plot_id": pc.id, "market_access": pc.access, "error": pc.access_error} for pc in ctx.plots]
     return out
@@ -404,114 +449,3 @@ def assemble(ctx: Ctx, scenario_id: str, problem: Problem, sol: optimizer.Soluti
 # ------------------------------------------------------------------------------------------------
 # 4. data & assumptions panel
 # ------------------------------------------------------------------------------------------------
-def build_data_panel(ctx: Ctx, problem: Problem, detail: dict, scenario_id: str, sol: optimizer.Solution) -> list[Row]:
-    cat, req = ctx.cat, ctx.req
-    rows: list[Row] = []
-    c = req.constraints
-    ovr = req.overrides or {}
-
-    def add(row: Row, group: str) -> None:
-        row.note = (f"[{group}] " + row.note).strip()
-        rows.append(row)
-
-    # Plots
-    for pc in ctx.plots:
-        s = source("user")
-        rows.append(Row(f"plot.{pc.id}.geometry", f"{pc.id} geometry", pc.geometry_source, "", pc.geometry_source, "", "n/a",
-                        "prototype_assumption" if "DEMO" in pc.geometry_source else "official_dataset", "demo" if "DEMO" in pc.geometry_source else "live",
-                        "[Land] Cadastral service not publicly available; see README"))
-        rows.append(Row(f"plot.{pc.id}.area", f"{pc.id} area (spherical, from geometry)", round(pc.area_m2, 1), "m2", "Computed from plot geometry", "", today(), "scientific_model", "computed", "[Land]"))
-    add(row_from_param("access_fraction", "Access / infrastructure share of plot", cat["defaults"]["access_fraction"], c.access_fraction, override_user=False), "Land")
-
-    # Climate + soil per plot
-    for pc in ctx.plots:
-        if pc.clim is not None:
-            m = pc.weather_meta
-            s = source("proto_limits")
-            rows.append(Row(f"climate.{pc.id}", f"{pc.id} daily weather (T2M, T2M_MAX/MIN, solar, RH, wind, rain)", f"{m['n_days']} days, {pc.df.index.min().date()}..{pc.df.index.max().date()}",
-                            "deg C, MJ/m2/d, %, m/s, mm/d", "NASA POWER daily point API (AG community)", m["source_url"], m["retrieved_at"], "open_dataset",
-                            m["status"], f"[Climate] query cell {pc.cell} (native 0.5x0.625 deg MERRA-2 / 1 deg CERES); requested centroid {pc.lon:.4f},{pc.lat:.4f}"))
-            rows.append(Row(f"et0.{pc.id}", f"{pc.id} reference ET0 (annual mean)", round(sum(a * b for a, b in zip(pc.clim['et0_mm_day'], pc.clim['days'])), 0), "mm/year",
-                            "FAO-56 Penman-Monteith on NASA POWER inputs", "https://www.fao.org/4/x0490e/x0490e00.htm", today(), "scientific_model", "computed", "[Climate]"))
-        else:
-            rows.append(missing_row(f"climate.{pc.id}", f"{pc.id} daily weather", "", pc.weather_error or "not retrieved", "user"))
-        if pc.soil:
-            sm = pc.soil_meta
-            for k, unit in (("phh2o", "pH"), ("sand", "%"), ("silt", "%"), ("clay", "%")):
-                v = pc.soil.get(k)
-                rows.append(Row(f"soil.{pc.id}.{k}", f"{pc.id} soil {k} (0-100 cm, depth-weighted)", None if v is None else round(v, 2), unit, "ISRIC SoilGrids 2.0 (WCS, 250 m)", sm["source_url"],
-                                sm["retrieved_at"], "open_dataset", "missing" if v is None else sm["status"], "[Soil] pixel median around the plot centroid"))
-            rows.append(Row(f"soil.{pc.id}.texture", f"{pc.id} USDA texture class (derived)", pc.soil.get("texture_class"), "", "Derived from SoilGrids sand/silt/clay", "", today(), "scientific_model", "computed",
-                            "[Soil] used to choose the AquaCrop soil file"))
-        else:
-            rows.append(missing_row(f"soil.{pc.id}", f"{pc.id} SoilGrids properties", "", pc.soil_error or "not retrieved", "user"))
-    if c.soil_ec_ds_m is None:
-        rows.append(missing_row("soil.ec", "Measured soil salinity (ECe)", "dS/m", "Not provided. SoilGrids has no salinity layer; no salinity yield penalty was applied.", "user"))
-    else:
-        rows.append(row_from_param("soil.ec", "Measured soil salinity (ECe)", {"value": c.soil_ec_ds_m, "unit": "dS/m", "src": "user"}))
-
-    # Constraints
-    rows.append(row_from_param("budget", "Budget (max CapEx)", {"value": c.budget_qar, "unit": "QAR", "src": "user"}))
-    rows.append(row_from_param("water", "Available water (annual, after scenario factor)", {"value": problem.limits.water_year, "unit": "m3/year", "src": "user"}))
-    rows.append(row_from_param("energy", "Available energy (annual)", {"value": c.energy_kwh_year, "unit": "kWh/year", "src": "user"}))
-    d = cat["defaults"]
-    e_price, w_price, e_src, w_src = _tariffs(ctx, cat["scenarios"][scenario_id])
-    rows.append(row_from_param("electricity", "Electricity price (after scenario factor)", {"value": round(e_price, 4), "unit": "QAR/kWh", "src": e_src}))
-    rows.append(row_from_param("water_price", "Water price", {"value": w_price, "unit": "QAR/m3", "src": w_src}))
-    for k, label in (("monthly_peak_factor", "Monthly peak factor on water/energy caps"), ("min_land_utilisation", "Minimum land utilisation"), ("min_block_m2", "Minimum block area"),
-                     ("horizon_years", "Horizon"), ("effective_rain_fraction", "Effective rain fraction")):
-        val = {"monthly_peak_factor": c.monthly_peak_factor, "min_land_utilisation": c.min_land_utilisation, "min_block_m2": c.min_block_m2,
-               "horizon_years": c.horizon_years}.get(k, d[k]["value"])
-        src = d[k]["src"] if val == d[k]["value"] else "user"
-        rows.append(row_from_param(k, label, {"value": val, "unit": d[k]["unit"], "src": src}))
-
-    # Crops
-    for cid in req.crops:
-        crop = cat["crops"][cid]
-        price = req.prices.get(cid)
-        rows.append(row_from_param(f"crop.{cid}.price", f"{crop['name']} selling price", {"value": price if price is not None else crop["price_qar_kg"]["value"], "unit": "QAR/kg",
-                                                                                            "src": "user" if price is not None else crop["price_qar_kg"]["src"]}))
-        for k, label in (("cycle_days", "crop cycle"), ("turnaround_days", "turnaround"), ("stage_days", "stage lengths"), ("kc", "Kc (ini, mid, end)"), ("temp_limits_c", "temperature limits"),
-                         ("salinity", "salinity tolerance (Maas-Hoffman)"), ("inputs_qar_m2_cycle", "inputs cost")):
-            rows.append(row_from_param(f"crop.{cid}.{k}", f"{crop['name']} {label}", crop[k]))
-    # Yields (what the model actually used, per plot/technique)
-    seen = set()
-    for (pid, cid, tid), dd in detail.items():
-        key = (cid, tid, dd["yield_kind"], dd["yield_src"])
-        if key in seen:
-            continue
-        seen.add(key)
-        crop, tech = cat["crops"][cid], cat["techniques"][tid]
-        if dd["yield_kind"] == "aquacrop":
-            aq = dd["y"]["aquacrop"]
-            src = source("aquacrop")
-            rows.append(Row(f"yield.{cid}.{tid}", f"{crop['name']} x {tech['name']} yield per cycle (calibrated AquaCrop)", round(dd["yield_kg_m2_cycle"], 3), "kg/m2/cycle", src["name"], src["url"], today(),
-                            "scientific_model", "live", f"[Yield] AquaCrop attainable {aq['yield_t_ha_uncalibrated']:.0f} t/ha x national calibration factor {aq['calibration_factor']:.3f} "
-                            f"(Qatar median {dd['y']['stat']['t_ha']:.1f} t/ha / AquaCrop at reference site). Soil file: {aq['soil_class_used']}{' (fallback, SoilGrids missing)' if aq['soil_is_fallback'] else ''}. "
-                            f"{aq['plot']['n_seasons']} simulated seasons."))
-        elif dd["yield_kind"] == "official":
-            st = dd["y"]["stat"]
-            s = source(dd["yield_src"])
-            rej = f"; {len(st['rejected'])} record(s) rejected" if st["rejected"] else ""
-            rows.append(Row(f"yield.{cid}.{tid}", f"{crop['name']} x {tech['name']} yield per cycle", round(dd["yield_kg_m2_cycle"], 3), "kg/m2/cycle", s["name"], s["url"], dd["y"]["stat_meta"]["retrieved_at"],
-                            "official_dataset", dd["y"]["stat_meta"]["status"], f"[Yield] median of {st['n']} year(s) {st['years_used'][0]}-{st['years_used'][-1]} = {st['t_ha']:.1f} t/ha{rej}. {dd['yield_note']}"))
-        else:
-            s = source(dd["yield_src"])
-            rows.append(Row(f"yield.{cid}.{tid}", f"{crop['name']} x {tech['name']} yield per cycle", dd["yield_kg_m2_cycle"], "kg/m2/cycle", s["name"], s["url"], "n/a", s["type"], s["status"],
-                            "[Yield] " + s["note"] + (" Model class: empirical - AquaCrop is NOT applied." if not tech["soil_based"] or tid != "open_field" else "")))
-    # Techniques + infrastructure
-    for tid in req.techniques:
-        tech = cat["techniques"][tid]
-        for k, label in (("capex_qar_m2", "CapEx"), ("fixed_capex_qar", "fixed CapEx"), ("opex_qar_m2_year", "OpEx"), ("water_coefficient", "water coefficient"), ("irrigation_efficiency", "irrigation efficiency"),
-                         ("extra_water_m3_m2_year", "cooling water"), ("energy_kwh_m2_year", "energy"), ("cooling_share", "cooling share of energy"), ("min_area_m2", "minimum area")):
-            rows.append(row_from_param(f"tech.{tid}.{k}", f"{tech['name']} {label}", tech[k]))
-    used_groups = sorted({g for t in req.techniques for g in cat["techniques"][t]["requires"]})
-    for gid in used_groups:
-        g = cat["groups"][gid]
-        rows.append(row_from_param(f"infra.{gid}.capex", f"{g['name']} - fixed CapEx (paid once per plot)", g["fixed_capex_qar"]))
-        rows.append(row_from_param(f"infra.{gid}.opex", f"{g['name']} - fixed OpEx", g["fixed_opex_qar_year"]))
-    if req.scenario != "normal" or scenario_id != "normal":
-        sc = cat["scenarios"][scenario_id]
-        rows.append(Row("scenario", f"Scenario: {sc['name']}", f"water x{sc['water_factor']}, electricity price x{sc['electricity_price_factor']}", "", source(sc["src"])["name"], "", "n/a", "prototype_assumption", "placeholder", sc["description"]))
-    rows.append(Row("solver", "Optimization method", sol.solver.get("method", ""), "", "OR-Tools pywraplp / SCIP MIP + Dinkelbach", "https://developers.google.com/optimization", today(), "scientific_model", "computed", ""))
-    return rows

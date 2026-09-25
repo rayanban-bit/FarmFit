@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { Bar, BarChart, CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis, Legend } from "recharts";
-import type { Catalog, ComparisonRow, OptimizeResult } from "@/lib/types";
+import type { Catalog, ComparisonRow, OptimizeResult, SourceType } from "@/lib/types";
 import { TECH_COLOR, n0, n1, pct, qar, signed, years } from "@/lib/format";
 import { Kpi, Notice, Section, Segmented, TypeBadge } from "./ui";
 import DataPanel from "./DataPanel";
@@ -25,11 +25,11 @@ const TABS = [
   { id: "data", label: "Data & assumptions" },
 ] as const;
 
-const YIELD_BADGE = {
+const YIELD_BADGE: Record<string, { t: string; c: SourceType }> = {
   aquacrop: { t: "AquaCrop", c: "scientific_model" },
-  official: { t: "Official data", c: "official_dataset" },
-  parameter: { t: "Assumption", c: "prototype_assumption" },
-} as const;
+  official: { t: "Official Qatar data", c: "official_qatar" },
+  parameter: { t: "Unverified", c: "unverified" },
+};
 
 export default function ResultsPanel(p: Props) {
   const [tab, setTab] = useState<(typeof TABS)[number]["id"]>("summary");
@@ -40,6 +40,7 @@ export default function ResultsPanel(p: Props) {
   const base = r.baseline ?? r.baseline_free;
   const bsum = base?.summary;
   const infeasible = r.status === "INFEASIBLE" || r.portfolio.length === 0;
+  const requiredExcluded = r.excluded.filter((e) => e.kind === "required_input").length;
 
   return (
     <div className="flex h-full flex-col">
@@ -75,9 +76,38 @@ export default function ResultsPanel(p: Props) {
       <div className="min-h-0 flex-1 overflow-y-auto">
         {tab === "summary" && (
           <>
-            {(r.warnings.length > 0 || infeasible) && (
+            {(r.warnings.length > 0 || infeasible || r.accepted_planning_profile) && (
               <div className="space-y-2 px-5 pt-4">
-                {infeasible && <Notice tone="bad">No feasible portfolio: the budget, water or energy limit is too small for any technique&apos;s minimum scale. Relax a limit and re-run. No plan is shown because none exists.</Notice>}
+                {infeasible && r.status === "NO_VIABLE_INVESTMENT" && (
+                  <Notice tone="bad">
+                    <b>No viable investment solution.</b> Every farm these limits allow has a 5-year net cash flow of zero
+                    or less, so the optimizer allocated no land and a return on investment cannot be defined. Check the
+                    selling prices, the CapEx and OpEx figures, and the available budget, water and energy.
+                  </Notice>
+                )}
+                {infeasible && r.status !== "NO_VIABLE_INVESTMENT" && (
+                  <Notice tone="bad">
+                    No feasible portfolio was produced.{" "}
+                    {requiredExcluded > 0
+                      ? `${requiredExcluded} crop × technique combination${requiredExcluded === 1 ? " was" : "s were"} excluded because a required input has no value, and nothing was invented to fill the gap. Supply those inputs, or relax the budget, water or energy limits.`
+                      : "The budget, water or energy limit is too small for any technique's minimum viable area. Relax a limit and re-run."}
+                  </Notice>
+                )}
+                {r.status === "ZERO_CAPEX" && (
+                  <Notice tone="warn">
+                    <b>ROI is not defined for this plan.</b> Every selected system was given a capital cost of zero, so the
+                    plan produces without investment and the ratio net&nbsp;gain ÷ CapEx has no finite value. The plan below
+                    maximises 5-year net cash flow instead. Enter real CapEx figures to get an ROI.
+                  </Notice>
+                )}
+                {r.accepted_planning_profile && (
+                  <Notice tone="warn">
+                    <b>Estimated values were used</b> for the technical assumptions you left blank — construction costs, labour,
+                    maintenance, energy and water coefficients. They are order-of-magnitude figures, not sourced data, and every
+                    one is marked <b>Estimate</b> in Data &amp; assumptions. Replace them with real quotations before treating
+                    any number here as evidence.
+                  </Notice>
+                )}
                 {r.warnings.map((w, i) => (<Notice key={i} tone="warn">{w}</Notice>))}
               </div>
             )}
@@ -94,12 +124,40 @@ export default function ResultsPanel(p: Props) {
                   <Kpi label="Energy" value={`${n0(s.energy_kwh)} kWh/yr`} sub={`${pct(s.energy_kwh / r.limits.energy_kwh_year)} of ${n0(r.limits.energy_kwh_year)}`} />
                 </div>
 
+                {r.limiting.unallocated_share > 0.02 && (
+                  <Section title="Why is land left unallocated?" aside={<span className="eyebrow">binding constraint</span>}>
+                    <Notice tone={r.limiting.limiting_factor === "land" ? "info" : "warn"}>{r.limiting.headline}</Notice>
+                    <table className="tbl mt-2">
+                      <thead><tr><th>Limit</th><th className="r">Used</th><th className="r">Available</th><th className="r">Supports</th></tr></thead>
+                      <tbody>
+                        {r.limiting.limits.map((l) => (
+                          <tr key={l.key} style={l.binding ? { background: "#fbf1dd" } : undefined}>
+                            <td>
+                              <span style={l.binding ? { fontWeight: 600, color: "var(--warn)" } : undefined}>{l.label}</span>
+                              {l.binding && <span className="chip ml-1.5" style={{ borderColor: "var(--warn)", color: "var(--warn)" }}>binding</span>}
+                              {l.note && <div className="mt-0.5 text-[10.5px] leading-snug text-[var(--muted)]">{l.note}</div>}
+                            </td>
+                            <td className="r num">{n0(l.used)}</td>
+                            <td className="r num">{l.limit == null || !isFinite(l.limit) ? "—" : n0(l.limit)}</td>
+                            <td className="r num">{l.land_supported_m2 == null ? "—" : `${n0(l.land_supported_m2)} m²`}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    <p className="mt-2 text-[11.5px] leading-snug text-[var(--muted)]">
+                      “Supports” is how much land each limit alone would allow for the system the solver chose. The
+                      smallest of them is what actually caps the farm. Unallocated land is a real result, not a gap in the
+                      cadastral data — the boundary and its registered area come from the live Qatar cadastre.
+                    </p>
+                  </Section>
+                )}
+
                 <Section title="Portfolio" aside={<span className="eyebrow">from the solver</span>}>
                   <table className="tbl">
                     <thead><tr><th>Crop</th><th>Technique</th><th className="r">Area m²</th><th className="r">Yield t/yr</th><th className="r">Revenue QAR</th></tr></thead>
                     <tbody>
                       {r.portfolio.map((b, i) => {
-                        const yb = YIELD_BADGE[b.yield_source];
+                        const yb = YIELD_BADGE[b.yield_source] ?? YIELD_BADGE.parameter;
                         return (
                           <tr key={i}>
                             <td>
@@ -144,17 +202,40 @@ export default function ResultsPanel(p: Props) {
               </>
             )}
             {r.excluded.length > 0 && (
-              <Section title="Excluded options" aside={<span className="eyebrow">{r.excluded.length}</span>}>
-                <details>
-                  <summary className="cursor-pointer text-[12px] text-[var(--muted)]">Options removed before optimization, with reasons</summary>
-                  <table className="tbl mt-2">
-                    <tbody>
-                      {r.excluded.map((e, i) => (
-                        <tr key={i}><td className="num whitespace-nowrap">{e.plot}</td><td>{p.cat.crops[e.crop]?.name} × {p.cat.techniques[e.technique]?.name}</td><td className="text-[var(--muted)]">{e.reason}</td></tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </details>
+              <Section title="Excluded combinations" aside={<span className="eyebrow">{r.excluded.length}</span>}>
+                <p className="mb-2 text-[12px] text-[var(--muted)]">
+                  Every combination the optimizer refused, with its exact reason. None of these was replaced by a guessed number.
+                </p>
+                {(["required_input", "climate", "data", "incompatible"] as const).map((kind) => {
+                  const rows = r.excluded.filter((e) => (e.kind ?? "incompatible") === kind);
+                  if (!rows.length) return null;
+                  const title =
+                    kind === "required_input" ? "Required input unavailable — enter value"
+                    : kind === "climate" ? "No thermally feasible growing window"
+                    : kind === "data" ? "No usable official data"
+                    : "Incompatible crop × technique";
+                  return (
+                    <details key={kind} className="mb-1.5 border border-[var(--line)] px-2.5 py-1.5" open={kind === "required_input"}>
+                      <summary className="cursor-pointer text-[12px]">
+                        <span className="font-medium" style={kind === "required_input" ? { color: "var(--warn)" } : undefined}>{title}</span>
+                        <span className="num ml-2 text-[var(--muted)]">{rows.length}</span>
+                      </summary>
+                      <table className="tbl mt-1.5">
+                        <tbody>
+                          {rows.map((e, i) => (
+                            <tr key={i}>
+                              <td className="num whitespace-nowrap align-top">{e.plot}</td>
+                              <td className="align-top">{p.cat.crops[e.crop]?.name ?? e.crop} × {p.cat.techniques[e.technique]?.name ?? e.technique}</td>
+                              <td className="text-[11.5px] leading-snug text-[var(--muted)]">
+                                {e.missing?.length ? e.missing.map((m) => m.label).join("; ") : e.reason}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </details>
+                  );
+                })}
               </Section>
             )}
           </>

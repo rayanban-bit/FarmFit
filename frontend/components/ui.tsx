@@ -4,19 +4,25 @@ import type { ReactNode } from "react";
 import type { SourceType } from "@/lib/types";
 
 export const TYPE_LABEL: Record<SourceType, string> = {
+  official_qatar: "Official Qatar data",
   official_dataset: "Official dataset",
   scientific_model: "Scientific model",
+  peer_reviewed: "Peer-reviewed research",
   open_dataset: "Open dataset",
+  vendor_data: "Vendor data",
   user_supplied: "User supplied",
-  prototype_assumption: "Prototype assumption",
+  unverified: "Estimate",
 };
 
 const TYPE_STYLE: Record<SourceType, { bg: string; fg: string; bd: string }> = {
+  official_qatar: { bg: "#dce9e3", fg: "#14483b", bd: "#a8c4b9" },
   official_dataset: { bg: "#e4ede9", fg: "#1f5c4d", bd: "#b9cfc6" },
   scientific_model: { bg: "#e5ebf3", fg: "#2d5580", bd: "#bccbe0" },
+  peer_reviewed: { bg: "#e3e9f5", fg: "#33417d", bd: "#bcc5e2" },
   open_dataset: { bg: "#eae7f1", fg: "#5a4680", bd: "#cfc7de" },
+  vendor_data: { bg: "#efeade", fg: "#5d4a22", bd: "#d3c8ae" },
   user_supplied: { bg: "#fff", fg: "#1b1e1c", bd: "#1b1e1c" },
-  prototype_assumption: { bg: "#f4ecd9", fg: "#86560f", bd: "#dcc79b" },
+  unverified: { bg: "#f4ecd9", fg: "#86560f", bd: "#dcc79b" },
 };
 
 export function TypeBadge({ type, label }: { type: SourceType; label?: string }) {

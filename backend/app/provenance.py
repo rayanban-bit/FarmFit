@@ -15,11 +15,14 @@ DATA_DIR = Path(__file__).resolve().parents[2] / "data"
 CACHE_DIR = DATA_DIR / "cache"
 
 TYPES = {
+    "official_qatar": "Official Qatar data",
     "official_dataset": "Official dataset",
     "scientific_model": "Scientific model",
+    "peer_reviewed": "Peer-reviewed research",
     "open_dataset": "Open dataset",
+    "vendor_data": "Vendor data",
     "user_supplied": "User supplied",
-    "prototype_assumption": "Prototype assumption",
+    "unverified": "Unverified",
 }
 
 
