@@ -1,0 +1,14 @@
+{
+  "_readme": "Default planning parameters shown in the UI (all editable).",
+  "electricity_qar_kwh": {"value": 0.12, "unit": "QAR/kWh", "src": "proto_tariff"},
+  "water_qar_m3": {"value": 0.6, "unit": "QAR/m3", "src": "proto_tariff"},
+  "access_fraction": {"value": 0.08, "unit": "share of plot area kept for access/infrastructure", "src": "proto_limits"},
+  "monthly_peak_factor": {"value": 2.0, "unit": "x (annual cap / 12) allowed in a single month", "src": "proto_limits"},
+  "min_land_utilisation": {"value": 0.8, "unit": "share of usable area", "src": "proto_limits"},
+  "min_block_m2": {"value": 100, "unit": "m2 (smallest production block)", "src": "proto_limits"},
+  "horizon_years": {"value": 5, "unit": "years", "src": "proto_limits"},
+  "effective_rain_fraction": {"value": 0.6, "unit": "-", "src": "proto_limits"},
+  "budget_qar": {"value": 1200000, "unit": "QAR", "src": "user"},
+  "water_m3_year": {"value": 16000, "unit": "m3/year", "src": "user"},
+  "energy_kwh_year": {"value": 400000, "unit": "kWh/year", "src": "user"}
+}

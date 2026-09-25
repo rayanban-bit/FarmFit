@@ -1,0 +1,8 @@
+{
+  "_readme": "Shared infrastructure groups. Each group is a binary decision per plot (infra[p,g]); its fixed cost is paid ONCE no matter how many production systems on the plot require it. This is the explicit source of CapEx(shared) < sum of standalone CapEx.",
+  "groups": {
+    "water_network": {"name": "Water network (pump, filtration, tank)", "fixed_capex_qar": {"value": 15000, "unit": "QAR per plot", "src": "proto_infra"}, "fixed_opex_qar_year": {"value": 600, "unit": "QAR/year", "src": "proto_infra"}},
+    "climate_plant": {"name": "Cooling / climate-control plant and electrical connection", "fixed_capex_qar": {"value": 60000, "unit": "QAR per plot", "src": "proto_infra"}, "fixed_opex_qar_year": {"value": 3000, "unit": "QAR/year", "src": "proto_infra"}},
+    "nutrient_dosing": {"name": "Nutrient dosing and fertigation control", "fixed_capex_qar": {"value": 25000, "unit": "QAR per plot", "src": "proto_infra"}, "fixed_opex_qar_year": {"value": 1200, "unit": "QAR/year", "src": "proto_infra"}}
+  }
+}

@@ -1,0 +1,10 @@
+fastapi==0.141.1
+uvicorn[standard]==0.54.0
+ortools==9.15.6755
+aquacrop==3.1.0
+httpx==0.28.1
+pydantic==2.13.5
+numpy==2.5.3
+pandas==3.0.6
+tifffile==2026.9.20
+pytest==9.1.1

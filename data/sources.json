@@ -1,0 +1,136 @@
+{
+  "_readme": "Provenance registry. Every numeric parameter in crops.json / techniques.json / infrastructure.json / scenarios.json / defaults.json references one entry here via its 'src' key. type is one of: official_dataset | scientific_model | open_dataset | user_supplied | prototype_assumption.",
+  "sources": {
+    "fao56": {
+      "name": "FAO Irrigation and Drainage Paper 56 - Crop evapotranspiration (Allen et al., 1998), Tables 11-12",
+      "url": "https://www.fao.org/4/x0490e/x0490e00.htm",
+      "type": "scientific_model",
+      "status": "transcribed_verify",
+      "retrieved": "2026-09-25",
+      "note": "Kc values and stage lengths transcribed by the developer from the publication; re-check against the tables before relying on them."
+    },
+    "fao29": {
+      "name": "FAO Irrigation and Drainage Paper 29 rev.1 - Water quality for agriculture (Ayers & Westcot), Table 4 (Maas-Hoffman salinity thresholds)",
+      "url": "https://www.fao.org/4/t0234e/t0234e00.htm",
+      "type": "scientific_model",
+      "status": "transcribed_verify",
+      "retrieved": "2026-09-25",
+      "note": "ECe threshold and slope transcribed from the publication; re-check before relying on them."
+    },
+    "qatar_od_crops": {
+      "name": "State of Qatar Open Data - Production Area and Average Yield of Crops (open field)",
+      "url": "https://www.data.gov.qa/explore/dataset/production-area-and-average-yield-of-crops/",
+      "type": "official_dataset",
+      "status": "live_adapter",
+      "retrieved": "runtime",
+      "note": "Retrieved at run time through the Opendatasoft API. Records whose reported yield disagrees with production/area are rejected (see adapter)."
+    },
+    "qatar_od_greenhouse": {
+      "name": "State of Qatar Open Data - Cropped area & production of crops in greenhouses",
+      "url": "https://www.data.gov.qa/explore/dataset/cropped-area-and-production-of-crops-in-greenhouses/",
+      "type": "official_dataset",
+      "status": "live_adapter",
+      "retrieved": "runtime",
+      "note": "Greenhouse yield = production / cropped area. Covers tomato, cucumber and sweet pepper only."
+    },
+    "aquacrop": {
+      "name": "FAO AquaCrop (aquacrop Python package 3.1.0), built-in Tomato crop file",
+      "url": "https://github.com/aquacropos/aquacrop",
+      "type": "scientific_model",
+      "status": "live_model",
+      "retrieved": "runtime",
+      "note": "Applied to open-field tomato only: the only MVP crop with a calibrated crop file shipped with AquaCrop."
+    },
+    "proto_temp": {
+      "name": "Typical agronomic temperature limits (developer estimate, not cultivar specific)",
+      "url": "",
+      "type": "prototype_assumption",
+      "status": "placeholder",
+      "note": "Used only to decide which months a crop can be grown. Replace with cultivar-specific limits."
+    },
+    "proto_cycle": {
+      "name": "Crop cycle length, cycles-per-year cap and inputs cost (developer estimate)",
+      "url": "",
+      "type": "prototype_assumption",
+      "status": "placeholder",
+      "note": "Order-of-magnitude values pending a Qatar agronomist review."
+    },
+    "proto_price": {
+      "name": "Farm-gate selling price (developer estimate; no Qatar price dataset integrated)",
+      "url": "",
+      "type": "prototype_assumption",
+      "status": "placeholder",
+      "note": "Users are expected to overwrite these with their own prices."
+    },
+    "proto_yield": {
+      "name": "Controlled-environment yield per cycle (order of magnitude from published ranges; not verified for Qatar)",
+      "url": "",
+      "type": "prototype_assumption",
+      "status": "placeholder",
+      "note": "Used where no Qatar Open Data / AquaCrop value exists (soilless systems, greenhouse lettuce/strawberry)."
+    },
+    "proto_capex": {
+      "name": "Capital cost per m2 and fixed items (developer estimate; no supplier quotes)",
+      "url": "",
+      "type": "prototype_assumption",
+      "status": "placeholder",
+      "note": "Replace with supplier quotations."
+    },
+    "proto_opex": {
+      "name": "Annual operating cost excluding energy and water (developer estimate)",
+      "url": "",
+      "type": "prototype_assumption",
+      "status": "placeholder",
+      "note": "Labour, maintenance, consumables."
+    },
+    "proto_energy": {
+      "name": "Electricity use per m2 (developer estimate)",
+      "url": "",
+      "type": "prototype_assumption",
+      "status": "placeholder",
+      "note": "Cooling, lighting, pumping. Seasonal shape is derived from NASA POWER temperatures."
+    },
+    "proto_water": {
+      "name": "Water coefficient relative to open-field crop water demand (developer estimate)",
+      "url": "",
+      "type": "prototype_assumption",
+      "status": "placeholder",
+      "note": "Relative to FAO-56 ETc / AquaCrop irrigation; recirculating systems use less."
+    },
+    "proto_infra": {
+      "name": "Shared infrastructure fixed cost (developer estimate)",
+      "url": "",
+      "type": "prototype_assumption",
+      "status": "placeholder",
+      "note": "Paid once per plot no matter how many production systems use it."
+    },
+    "proto_tariff": {
+      "name": "Electricity and water unit prices (developer estimate; verify with the Kahramaa tariff)",
+      "url": "https://www.km.qa/",
+      "type": "prototype_assumption",
+      "status": "placeholder",
+      "note": "Not verified against the current Kahramaa tariff."
+    },
+    "proto_scenario": {
+      "name": "Scenario multipliers (definition of the what-if, not a forecast)",
+      "url": "",
+      "type": "prototype_assumption",
+      "status": "placeholder",
+      "note": "Editable in data/scenarios.json."
+    },
+    "proto_limits": {
+      "name": "Solver planning defaults (peak factor, access share, utilisation floor)",
+      "url": "",
+      "type": "prototype_assumption",
+      "status": "placeholder",
+      "note": "Modelling choices exposed in the UI."
+    },
+    "user": {
+      "name": "User supplied",
+      "url": "",
+      "type": "user_supplied",
+      "status": "user",
+      "note": "Entered by the user in the interface."
+    }
+  }
+}

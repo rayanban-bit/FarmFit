@@ -1,0 +1,195 @@
+@import "tailwindcss";
+
+:root {
+  --bg: #f3f2ec;
+  --panel: #fbfaf6;
+  --ink: #1b1e1c;
+  --muted: #666b65;
+  --faint: #8e928b;
+  --line: #dddacf;
+  --line-strong: #c3bfb2;
+  --accent: #1f5c4d;
+  --accent-soft: #e4ede9;
+  --good: #1f6a3d;
+  --bad: #9a3030;
+  --warn: #86560f;
+  --warn-soft: #f4ecd9;
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-panel: var(--panel);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-faint: var(--faint);
+  --color-line: var(--line);
+  --color-accent: var(--accent);
+  --font-sans: var(--font-plex-sans), system-ui, sans-serif;
+  --font-mono: var(--font-plex-mono), ui-monospace, monospace;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-plex-sans), system-ui, sans-serif;
+  font-size: 13px;
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+}
+
+.num {
+  font-family: var(--font-plex-mono), ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.01em;
+}
+
+.eyebrow {
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 500;
+}
+
+.h-section {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid var(--line-strong);
+  background: var(--panel);
+  color: var(--ink);
+  font-size: 12.5px;
+  font-weight: 500;
+  border-radius: 3px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.btn:hover {
+  background: #f0eee6;
+}
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.btn-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+  height: 34px;
+  padding: 0 16px;
+}
+.btn-primary:hover {
+  background: #184a3e;
+}
+
+.field {
+  height: 30px;
+  width: 100%;
+  border: 1px solid var(--line-strong);
+  background: #fff;
+  padding: 0 8px;
+  font-size: 12.5px;
+  border-radius: 3px;
+  font-family: var(--font-plex-mono), ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+}
+.field:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.chip {
+  display: inline-block;
+  font-size: 10.5px;
+  line-height: 16px;
+  padding: 0 6px;
+  border-radius: 2px;
+  border: 1px solid var(--line-strong);
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.tbl {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+.tbl th {
+  text-align: left;
+  font-weight: 500;
+  font-size: 10.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--line-strong);
+  white-space: nowrap;
+}
+.tbl td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+}
+.tbl .r {
+  text-align: right;
+}
+.tbl tr:last-child td {
+  border-bottom: none;
+}
+
+.rule {
+  border: 0;
+  border-top: 1px solid var(--line);
+  margin: 0;
+}
+
+/* map labels (HTML markers) */
+.map-label {
+  background: #fbfaf6;
+  border: 1px solid #1b1e1c;
+  padding: 1px 5px;
+  font-size: 11px;
+  line-height: 1.25;
+  white-space: nowrap;
+  pointer-events: none;
+  text-align: center;
+}
+.map-label b {
+  font-weight: 600;
+}
+.map-label .sub {
+  font-family: var(--font-plex-mono), monospace;
+  font-size: 10px;
+  color: #444;
+}
+.map-hide-labels .map-label.small {
+  display: none;
+}
+
+.maplibregl-ctrl-attrib {
+  font-size: 10px !important;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: #cfcbbe;
+  border: 2px solid var(--panel);
+  border-radius: 6px;
+}

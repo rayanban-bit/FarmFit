@@ -1,0 +1,55 @@
+# --- secrets / credentials: never commit
+.env
+.env.*
+!.env.example
+!.env.local.example
+*.pem
+*.key
+*.p12
+*.pfx
+credentials*.json
+*secret*
+*token*.txt
+
+# --- AI assistant instruction / state files
+CLAUDE.md
+AGENTS.md
+.claude/
+.cursor/
+.cursorrules
+
+# --- python
+backend/.venv/
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+
+# --- node / next
+node_modules/
+.next/
+out/
+build/
+coverage/
+*.tsbuildinfo
+next-env.d.ts
+npm-debug.log*
+frontend/public/maplibre/
+
+# --- IDE / OS / temp
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini
+*.log
+*.tmp
+tmp/
+
+# NOTE: data/cache/ is committed on purpose (~1 MB). It holds public API responses (NASA POWER, Qatar Open Data,
+# SoilGrids, AquaCrop results, OSM) with retrieval dates so the demo also works offline. It contains no credentials.
