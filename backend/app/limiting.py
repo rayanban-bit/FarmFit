@@ -79,7 +79,22 @@ def diagnose(problem: Problem, sol: Solution, usable_m2: float) -> dict:
         out["headline"] = "All usable land is allocated."
         return out
 
-    # the limit that supports the least land is what actually stops expansion
+    # Expansion is not always stopped by a resource. When the marginal block loses money, more land simply
+    # means a bigger loss, so economics is the binding consideration and no resource cap is reached.
+    marginal_profit = (o.rev_m2 - o.opex_m2) if o is not None else None
+    if marginal_profit is not None and marginal_profit <= 0:
+        out["limiting_factor"] = "economics"
+        floor = getattr(lim, "min_utilisation", 0.0) or 0.0
+        forced = floor > 0 and allocated <= floor * usable_m2 * 1.005
+        out["headline"] = (
+            f"{out['unallocated_share']:.0%} of the selected land ({unallocated:,.0f} m2) is unallocated because "
+            f"every additional square metre would lose money at the current costs and prices "
+            f"(QAR {marginal_profit:,.1f} per m2 a year on the system chosen)."
+            + (f" The {floor:.0%} minimum land-utilisation rule is why anything was planted at all."
+               if forced else " No resource limit was reached."))
+        return out
+
+    # otherwise the limit that supports the least land is what stops expansion
     scored = [r for r in rows if r["land_supported_m2"] is not None and r["key"] != "land"]
     tightest = min(scored, key=lambda r: r["land_supported_m2"]) if scored else None
     chosen = binding[0] if binding else tightest

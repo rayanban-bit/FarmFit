@@ -19,7 +19,14 @@ class Constraints(BaseModel):
     energy_kwh_year: float = Field(gt=0)
     soil_ec_ds_m: float | None = None  # measured ECe; None = unknown -> no salinity penalty, shown as missing
     access_fraction: float = Field(0.08, ge=0, lt=0.5)
-    min_land_utilisation: float = Field(0.8, ge=0, le=1)
+    min_land_utilisation: float = Field(0.95, ge=0, le=1)
+    # Portfolio-composition rules. They restrict the feasible set only; the solver still chooses every area,
+    # and any rule that cannot be met is relaxed in a stated order and reported.
+    min_distinct_combos: int = Field(3, ge=0, le=12)
+    min_combo_area_share: float = Field(0.05, ge=0, le=0.5)
+    min_distinct_techniques: int = Field(2, ge=0, le=4)
+    min_distinct_crops: int = Field(3, ge=0, le=8)
+    min_crop_area_share: float = Field(0.05, ge=0, le=0.5)
     # Optional delivery-rate limits: the most that can be drawn in one month. Leave them unset when only
     # the annual volume constrains you - that is what an annual quota means, and inventing a monthly cap
     # from it silently discards the rest of the allowance.
@@ -28,6 +35,9 @@ class Constraints(BaseModel):
     min_block_m2: float = Field(100.0, ge=1)
     max_crop_share: float = Field(1.0, gt=0, le=1)
     objective: Literal["roi", "net_profit"] = "roi"
+    # "portfolio" keeps the composition rules below; "economic" drops them and optimises the objective alone.
+    # Both are the same model and the same solver - only the feasible set differs.
+    mode: Literal["portfolio", "economic"] = "portfolio"
     horizon_years: int = Field(5, ge=1, le=30)
 
 

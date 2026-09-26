@@ -45,7 +45,7 @@ A second objective, 'net_profit', maximises N directly with a single MIP.
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Callable
 
 from ortools.linear_solver import pywraplp
@@ -122,6 +122,13 @@ class Limits:
     min_block_m2: float = 0.0
     horizon_years: int = 5
     objective: str = "roi"  # 'roi' | 'net_profit'
+    # Portfolio-composition rules. They restrict the FEASIBLE SET only: the objective is unchanged and the
+    # areas are still chosen by the solver, so the result remains a proved optimum among diversified plans.
+    min_distinct_combos: int = 0        # at least this many distinct crop x technique blocks farm-wide
+    min_combo_area_share: float = 0.0   # each active block must cover at least this share of usable land
+    min_distinct_techniques: int = 0    # at least this many different production techniques
+    min_distinct_crops: int = 0         # at least this many different crops
+    min_crop_area_share: float = 0.0    # each crop that IS grown must cover at least this share of usable land
     max_crop_share: float = 1.0
 
     def water_cap_month(self) -> float:
@@ -194,6 +201,10 @@ class Solution:
     # Why the ratio objective ended the way it did: "optimal" | "no_viable_investment" |
     # "zero_capex_unbounded" | "zero_capex_undefined" | "not_applicable" (net_profit objective).
     ratio_outcome: str = "optimal"
+    relaxations: list[str] = field(default_factory=list)
+    # The limits actually enforced on the returned plan. When the ladder relaxed a rule this
+    # differs from problem.limits, and feasibility must be judged against THIS.
+    effective_limits: 'Limits | None' = None
 
 
 # ------------------------------------------------------------------------------------------------
@@ -301,6 +312,30 @@ def check_feasible(problem: Problem, alloc: dict[tuple[str, str, str], float], u
     total_usable = sum(usable.values())
     if util_floor > 0 and ev["area_m2"] < util_floor * total_usable * (1 - tol) - tol:
         violations.append("land utilisation floor not met")
+    combos = {(c, t) for (_p, c, t), a in alloc.items() if a > 1e-9}
+    if lim.min_distinct_combos and len(combos) < lim.min_distinct_combos:
+        violations.append(f"only {len(combos)} distinct crop x technique block(s); {lim.min_distinct_combos} required")
+    if lim.min_distinct_techniques and len({t for (_c, t) in combos}) < lim.min_distinct_techniques:
+        violations.append("too few distinct production techniques")
+    crops_grown = {c for (c, _t) in combos}
+    if lim.min_distinct_crops and len(crops_grown) < lim.min_distinct_crops:
+        violations.append(f"only {len(crops_grown)} crop(s) grown; {lim.min_distinct_crops} required")
+    if lim.min_crop_area_share > 0:
+        need_c = lim.min_crop_area_share * total_usable
+        per_crop2: dict[str, float] = {}
+        for (_p, c, _t), a in alloc.items():
+            per_crop2[c] = per_crop2.get(c, 0.0) + a
+        for c, a in per_crop2.items():
+            if a > 1e-9 and a < need_c * (1 - tol) - tol:
+                violations.append(f"crop {c} is below the minimum participation share")
+    if lim.min_combo_area_share > 0:
+        need = lim.min_combo_area_share * total_usable
+        per_combo: dict[tuple[str, str], float] = {}
+        for (_p, c, t), a in alloc.items():
+            per_combo[(c, t)] = per_combo.get((c, t), 0.0) + a
+        for (c, t), a in per_combo.items():
+            if a > 1e-9 and a < need * (1 - tol) - tol:
+                violations.append(f"block {c}x{t} is below the minimum viable share of the farm")
     if lim.max_crop_share < 1.0:
         for c, a in per_crop.items():
             if a > lim.max_crop_share * total_usable * (1 + tol) + tol:
@@ -378,8 +413,65 @@ class _Model:
             for c in sorted({o.crop for o in opts}):
                 s.Add(sum(self.a[(pl.id, j)] for pl, j, o in self.items if o.crop == c) <= lim.max_crop_share * total_usable)
 
+        # ---- portfolio composition ----------------------------------------------------------------
+        # u[c,t] marks a crop x technique as an active block anywhere on the farm. Requiring several of
+        # them, each above a minimum size, forces a genuine multi-part portfolio without touching the
+        # objective or pinning any area: the solver still decides every percentage.
+        self.u: dict[tuple[str, str], pywraplp.Variable] = {}
+        pairs = problem.pairs()
+        if (lim.min_distinct_combos > 0 or lim.min_combo_area_share > 0 or lim.min_distinct_techniques > 0
+                or lim.min_distinct_crops > 0 or lim.min_crop_area_share > 0):
+            # An active marker must correspond to real planted area, otherwise u[c,t] could be 1 with zero
+            # area and "three blocks" would be satisfied by a farm that plants one.
+            min_block = max(lim.min_combo_area_share * total_usable, lim.min_block_m2 if lim.min_distinct_combos else 0.0)
+            for (c, t) in pairs:
+                u = s.BoolVar(f"use[{c},{t}]")
+                self.u[(c, t)] = u
+                terms = [self.a[(pl.id, j)] for pl, j, o in self.items if o.key == (c, t)]
+                if not terms:
+                    s.Add(u == 0)
+                    continue
+                s.Add(sum(terms) <= total_usable * u)
+                if min_block > 0:
+                    s.Add(sum(terms) >= min_block * u)
+                    # and a block that is planted must be marked active, so the count cannot be dodged
+                    s.Add(sum(terms) <= total_usable * u)
+            if lim.min_distinct_combos > 0:
+                s.Add(sum(self.u.values()) >= lim.min_distinct_combos)
+            if lim.min_distinct_crops > 0 or lim.min_crop_area_share > 0:
+                # w[c] marks a crop as grown anywhere. Requiring several, each above a minimum participation,
+                # produces crop diversity without pinning any area: the solver still sets every percentage.
+                self.w: dict[str, pywraplp.Variable] = {}
+                min_crop = max(lim.min_crop_area_share * total_usable,
+                               lim.min_block_m2 if lim.min_distinct_crops else 0.0)
+                for c in sorted({cc for (cc, _t) in pairs}):
+                    wv = s.BoolVar(f"useCrop[{c}]")
+                    self.w[c] = wv
+                    terms = [self.a[(pl.id, j)] for pl, j, o in self.items if o.crop == c]
+                    if not terms:
+                        s.Add(wv == 0)
+                        continue
+                    s.Add(sum(terms) <= total_usable * wv)
+                    if min_crop > 0:
+                        s.Add(sum(terms) >= min_crop * wv)
+                if lim.min_distinct_crops > 0:
+                    s.Add(sum(self.w.values()) >= lim.min_distinct_crops)
+            if lim.min_distinct_techniques > 0:
+                self.v: dict[str, pywraplp.Variable] = {}
+                for t in techs_used:
+                    v = s.BoolVar(f"useTech[{t}]")
+                    self.v[t] = v
+                    us = [self.u[(c, tt)] for (c, tt) in pairs if tt == t and (c, tt) in self.u]
+                    if us:
+                        for uu in us:
+                            s.Add(v >= uu)
+                        s.Add(v <= sum(us))
+                    else:
+                        s.Add(v == 0)
+                s.Add(sum(self.v.values()) >= lim.min_distinct_techniques)
+
         self.n_vars = s.NumVariables()
-        self.n_int = len(self.z) + len(self.b) + len(self.y)
+        self.n_int = len(self.z) + len(self.b) + len(self.y) + len(self.u)
         self.n_cons = s.NumConstraints()
 
     def _profit_expr(self):
@@ -499,7 +591,11 @@ def _run(problem: Problem, util_floor: float, on_progress, time_limit_s: float, 
             if on_progress:
                 on_progress(it)
 
-            converged_here = f <= tol * max(1.0, abs(n), d)
+            # Dinkelbach's root condition is F(lambda) = 0, not F(lambda) <= 0. F < 0 means lambda has
+            # overshot lambda* and Newton must keep going (it will decrease lambda). Accepting F <= tol made
+            # the loop stop at k=0 whenever the best net gain was negative, returning the max-cash-flow plan
+            # mislabelled as the max-ROI plan.
+            converged_here = abs(f) <= tol * max(1.0, abs(n), d)
 
             if d <= CAPEX_TOL:
                 # At the Dinkelbach root F(lambda) = 0 the "build nothing" point (N = 0, CapEx = 0) ties the
@@ -531,7 +627,9 @@ def _run(problem: Problem, util_floor: float, on_progress, time_limit_s: float, 
                 converged = True
                 ratio_outcome = "optimal"
                 break
-            if k > 0 and ratio <= lam + 1e-12:  # lambda can no longer increase: at the root
+            # lambda has stopped moving: we are at the root. This holds whether Newton approached it from
+            # below (profitable farms) or from above (every plan loses money, so lambda* < 0).
+            if k > 0 and abs(ratio - lam) <= 1e-12 * max(1.0, abs(lam)):
                 converged = True
                 ratio_outcome = "optimal"
                 break
@@ -584,20 +682,55 @@ def solve_with_floor(problem: Problem, floor: float, time_limit_s: float = 30.0)
 
 def solve(problem: Problem, on_progress: Callable[[Iteration], None] | None = None,
           time_limit_s: float = 60.0, max_iter: int = 40, tol: float = 1e-9) -> Solution:
-    """Solve the portfolio problem. Relaxes the utilisation floor (with a warning) if it is infeasible."""
+    """Solve the portfolio problem, relaxing composition rules one at a time and saying so.
+
+    The ladder never fabricates a result: each rung drops one stated requirement, the solve is repeated, and
+    every dropped requirement is reported in `warnings` and `relaxations`.
+    """
     lim = problem.limits
     if not problem.options or not problem.plots:
-        return Solution("INFEASIBLE", {}, set(), set(), evaluate(problem, {}), [], {"backend": "none"}, ["No feasible crop x technique option."])
-    floor = lim.min_utilisation
-    sol = _run(problem, floor, on_progress, time_limit_s, max_iter, tol)
-    if sol is None and floor > 0:
-        sol = _run(problem, 0.0, on_progress, time_limit_s, max_iter, tol)
+        return Solution("INFEASIBLE", {}, set(), set(), evaluate(problem, {}), [], {"backend": "none"},
+                        ["No feasible crop x technique option."])
+
+    ladder: list[tuple[Limits, float, str]] = [(lim, lim.min_utilisation, "")]
+    if lim.min_crop_area_share > 0:
+        ladder.append((replace(lim, min_crop_area_share=0.0), lim.min_utilisation,
+                       f"the minimum participation of {lim.min_crop_area_share:.0%} of usable land per crop"))
+    if lim.min_distinct_crops > 0:
+        ladder.append((replace(lim, min_crop_area_share=0.0, min_distinct_crops=0), lim.min_utilisation,
+                       f"the requirement for {lim.min_distinct_crops} different crops"))
+    if lim.min_distinct_techniques > 0:
+        ladder.append((replace(lim, min_crop_area_share=0.0, min_distinct_crops=0, min_distinct_techniques=0),
+                       lim.min_utilisation,
+                       f"the requirement for {lim.min_distinct_techniques} different production techniques"))
+    if lim.min_combo_area_share > 0:
+        ladder.append((replace(lim, min_crop_area_share=0.0, min_distinct_crops=0, min_distinct_techniques=0,
+                               min_combo_area_share=0.0), lim.min_utilisation,
+                       f"the minimum block size of {lim.min_combo_area_share:.0%} of usable land"))
+    if lim.min_distinct_combos > 0:
+        ladder.append((replace(lim, min_crop_area_share=0.0, min_distinct_crops=0, min_distinct_techniques=0,
+                               min_combo_area_share=0.0, min_distinct_combos=0), lim.min_utilisation,
+                       f"the requirement for {lim.min_distinct_combos} distinct crop x technique blocks"))
+    if lim.min_utilisation > 0:
+        ladder.append((replace(lim, min_crop_area_share=0.0, min_distinct_crops=0, min_distinct_techniques=0,
+                               min_combo_area_share=0.0, min_distinct_combos=0), 0.0,
+                       f"the minimum land utilisation of {lim.min_utilisation:.0%}"))
+
+    dropped: list[str] = []
+    for rung, (lm, floor, gave_up) in enumerate(ladder):
+        sol = _run(replace(problem, limits=lm), floor, on_progress, time_limit_s, max_iter, tol)
+        if gave_up:
+            dropped.append(gave_up)
         if sol is not None:
-            sol.warnings.append(
-                f"The requested minimum land utilisation of {floor:.0%} cannot be met within the budget/water/energy limits; "
-                "the floor was relaxed to 0% and the solver chose how much land to use."
-            )
-    if sol is None:
-        return Solution("INFEASIBLE", {}, set(), set(), evaluate(problem, {}), [], {"backend": "OR-Tools pywraplp / SCIP"},
-                        ["No portfolio satisfies the constraints (minimum technique scale, budget, water or energy is too small)."])
-    return sol
+            if dropped:
+                sol.warnings.append(
+                    "These limits could not be met together, so the following requirement(s) were relaxed, in "
+                    "order, until a plan existed: " + "; ".join(dropped) +
+                    ". Everything else is still enforced and the result is a proved optimum under what remains.")
+                sol.relaxations = list(dropped)
+            sol.utilisation_floor_used = floor
+            sol.effective_limits = lm
+            return sol
+    return Solution("INFEASIBLE", {}, set(), set(), evaluate(problem, {}), [], {"backend": "OR-Tools pywraplp / SCIP"},
+                    ["No portfolio satisfies the constraints even after relaxing every composition rule "
+                     "(minimum technique scale, budget, water or energy is too small)."])

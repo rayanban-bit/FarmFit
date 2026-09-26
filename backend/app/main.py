@@ -169,6 +169,7 @@ def compare(req: OptimizeRequest) -> dict:
     """Re-run the SAME optimizer for every scenario on the same prepared data."""
     try:
         ctx = pipeline.prepare_context(req)
-        return {"scenarios": {sid: pipeline.solve_scenario(ctx, sid, with_context=False) for sid in ctx.cat["scenarios"]}}
+        return {"scenarios": {sid: pipeline.solve_scenario(ctx, sid, with_context=False, with_alternatives=False)
+                              for sid in ctx.cat["scenarios"]}}
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

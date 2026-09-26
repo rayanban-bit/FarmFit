@@ -120,6 +120,14 @@
       "status": "live_adapter",
       "retrieved": "runtime",
       "note": "(c) OpenStreetMap contributors, ODbL. Used only for nearest-market context shown to the user; it is NOT an optimizer input."
+    },
+    "qatar_prices": {
+      "name": "Qatar local produce prices - reported farm-gate and Doha Central Market retail",
+      "url": "https://www.selinawamucii.com/insights/prices/qatar/vegetables/",
+      "type": "unverified",
+      "status": "reported_not_official",
+      "retrieved": "2026-09-26",
+      "note": "Two distinct price regimes are reported for Qatar. Wholesale/farm-gate for Qatari produce has been reported at about QAR 2.5/kg for tomato and QAR 3/kg for cucumber, while Doha Central Market retail for the same items is reported at QAR 6-10/kg. Local producers selling direct (for example through Mahaseel and the farmers' markets) realise the upper band. These are press and market-aggregator figures, NOT an official statistical series - Qatar Open Data publishes no farm-gate price dataset - so they are labelled unverified and are editable. The choice of regime decides whether protected cultivation repays its capital: at farm-gate wholesale prices it does not."
     }
   }
 }

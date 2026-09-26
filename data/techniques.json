@@ -1,98 +1,531 @@
 {
-  "_readme": "Production techniques. model_class states which yield model is scientifically honest for the technique: 'aquacrop_or_statistical' (soil-based open field) or 'empirical' (protected / soilless - AquaCrop is NOT applied). OpEx is built from components (labour, maintenance, plus electricity and water priced from metered use); it is never a single unsourced QAR/m2/year figure. Leaves with required_input=true have no defensible source and block the technique until a value is entered. 'profile_value' is used ONLY when the user explicitly accepts the unverified planning profile. requires = shared infrastructure groups (infrastructure.json) built once per plot.",
+  "_readme": "Production techniques. model_class states which yield model is scientifically honest for the technique: 'aquacrop_or_statistical' (soil-based open field) or 'empirical' (protected / soilless - AquaCrop is NOT applied). OpEx is built from components (labour, maintenance, plus electricity and water priced from metered use); it is never a single unsourced QAR/m2/year figure. Leaves with required_input=true have no defensible source and block the technique until a value is entered. 'profile_value' is used ONLY when the user explicitly accepts the unverified planning profile. requires = shared infrastructure groups (infrastructure.json) built once per plot. NOTE ON STRUCTURE TYPES: the official Qatar 'greenhouses' dataset (البيوت المحمية, protected houses) measures Qatar's actual protected cultivation, which is predominantly plastic tunnels and net houses rather than high-specification glasshouses. Pairing that yield with a high-tech structure cost overstates the capital needed to achieve it, so the structure below is modelled explicitly and the solver chooses between them.",
   "techniques": {
     "open_field": {
       "name": "Open field",
       "model_class": "aquacrop_or_statistical",
       "soil_based": true,
       "rain_exposed": true,
-      "compatible_crops": ["tomato", "cucumber", "lettuce", "bell_pepper", "strawberry"],
-      "capex_qar_m2": {"value": null, "unit": "QAR/m2", "src": "required", "required_input": true, "label": "Open field establishment CapEx (land preparation + drip irrigation)", "profile_value": 30},
-      "fixed_capex_qar": {"value": null, "unit": "QAR per plot", "src": "required", "required_input": true, "label": "Open field fixed setup cost per plot", "profile_value": 3000},
-      "opex_components": {
-        "labour_qar_m2_year": {"value": null, "unit": "QAR/m2/year", "src": "required", "required_input": true, "label": "Open field labour", "profile_value": 7},
-        "maintenance_qar_m2_year": {"value": null, "unit": "QAR/m2/year", "src": "required", "required_input": true, "label": "Open field maintenance and consumables", "profile_value": 5}
+      "compatible_crops": [
+        "tomato",
+        "cucumber",
+        "lettuce",
+        "bell_pepper",
+        "strawberry"
+      ],
+      "capex_qar_m2": {
+        "value": null,
+        "unit": "QAR/m2",
+        "src": "required",
+        "required_input": true,
+        "label": "Open field establishment CapEx (land preparation + drip irrigation)",
+        "profile_value": 30
       },
-      "water_coefficient": {"value": 1.0, "unit": "x FAO-56 / AquaCrop crop water demand", "src": "model_choice"},
-      "irrigation_efficiency": {"value": null, "unit": "-", "src": "required", "required_input": true, "label": "Open field irrigation efficiency", "profile_value": 0.9},
-      "extra_water_m3_m2_year": {"value": 0.0, "unit": "m3/m2/year", "src": "model_choice"},
-      "energy_kwh_m2_year": {"value": null, "unit": "kWh/m2/year", "src": "required", "required_input": true, "label": "Open field electricity (irrigation pumping)", "profile_value": 2.0},
-      "cooling_share": {"value": 0.0, "unit": "share of energy following cooling degree-days", "src": "model_choice"},
-      "cooling_delta_c": {"value": 0, "unit": "deg C reduction of daily max", "src": "model_choice"},
-      "heating_delta_c": {"value": 0, "unit": "deg C increase of daily min", "src": "model_choice"},
+      "fixed_capex_qar": {
+        "value": null,
+        "unit": "QAR per plot",
+        "src": "required",
+        "required_input": true,
+        "label": "Open field fixed setup cost per plot",
+        "profile_value": 3000
+      },
+      "opex_components": {
+        "labour_qar_m2_year": {
+          "value": null,
+          "unit": "QAR/m2/year",
+          "src": "required",
+          "required_input": true,
+          "label": "Open field labour",
+          "profile_value": 7
+        },
+        "maintenance_qar_m2_year": {
+          "value": null,
+          "unit": "QAR/m2/year",
+          "src": "required",
+          "required_input": true,
+          "label": "Open field maintenance and consumables",
+          "profile_value": 5
+        }
+      },
+      "water_coefficient": {
+        "value": 1.0,
+        "unit": "x FAO-56 / AquaCrop crop water demand",
+        "src": "model_choice"
+      },
+      "irrigation_efficiency": {
+        "value": null,
+        "unit": "-",
+        "src": "required",
+        "required_input": true,
+        "label": "Open field irrigation efficiency",
+        "profile_value": 0.9
+      },
+      "extra_water_m3_m2_year": {
+        "value": 0.0,
+        "unit": "m3/m2/year",
+        "src": "model_choice"
+      },
+      "energy_kwh_m2_year": {
+        "value": null,
+        "unit": "kWh/m2/year",
+        "src": "required",
+        "required_input": true,
+        "label": "Open field electricity (irrigation pumping)",
+        "profile_value": 2.0
+      },
+      "cooling_share": {
+        "value": 0.0,
+        "unit": "share of energy following cooling degree-days",
+        "src": "model_choice"
+      },
+      "cooling_delta_c": {
+        "value": 0,
+        "unit": "deg C reduction of daily max",
+        "src": "model_choice"
+      },
+      "heating_delta_c": {
+        "value": 0,
+        "unit": "deg C increase of daily min",
+        "src": "model_choice"
+      },
       "climate_controlled": false,
-      "min_area_m2": {"value": 500, "unit": "m2 per plot", "src": "model_choice"},
-      "requires": ["water_network"]
+      "min_area_m2": {
+        "value": 500,
+        "unit": "m2 per plot",
+        "src": "model_choice"
+      },
+      "requires": [
+        "water_network"
+      ]
     },
-    "greenhouse": {
-      "name": "Greenhouse (evaporative cooling / shading)",
+    "plastic_tunnel": {
+      "name": "Plastic tunnel / net house (cooling + shading)",
       "model_class": "empirical",
       "soil_based": true,
       "rain_exposed": false,
-      "compatible_crops": ["tomato", "cucumber", "lettuce", "bell_pepper", "strawberry"],
-      "capex_qar_m2": {"value": null, "unit": "QAR/m2", "src": "required", "required_input": true, "label": "Greenhouse structure CapEx (evaporative cooling + shading)", "profile_value": 534, "profile_note": "Figure cited by the project owner for a Qatar greenhouse with evaporative cooling and shading. The underlying publication could not be located or verified during implementation - treat as unverified and replace with a supplier quotation."},
-      "fixed_capex_qar": {"value": null, "unit": "QAR per plot", "src": "required", "required_input": true, "label": "Greenhouse fixed setup cost per plot", "profile_value": 10000},
-      "opex_components": {
-        "labour_qar_m2_year": {"value": null, "unit": "QAR/m2/year", "src": "required", "required_input": true, "label": "Greenhouse labour", "profile_value": 14},
-        "maintenance_qar_m2_year": {"value": null, "unit": "QAR/m2/year", "src": "required", "required_input": true, "label": "Greenhouse maintenance (covers, cooling pads, fans)", "profile_value": 11}
+      "compatible_crops": [
+        "tomato",
+        "cucumber",
+        "lettuce",
+        "bell_pepper",
+        "strawberry"
+      ],
+      "capex_qar_m2": {
+        "value": null,
+        "unit": "QAR/m2",
+        "src": "required",
+        "required_input": true,
+        "label": "Plastic tunnel / net house structure CapEx",
+        "profile_value": 227,
+        "profile_note": "Figure cited by the project owner for a Qatar plastic tunnel with cooling and shading. The underlying publication could not be located or verified; independent trade sources put a basic tunnel near USD 30/m2 (about QAR 109) and a high-specification glasshouse near USD 200/m2 (about QAR 728), so this sits in a plausible band. Replace it with a supplier quotation."
       },
-      "water_coefficient": {"value": null, "unit": "x open-field crop water demand", "src": "required", "required_input": true, "label": "Greenhouse irrigation water vs open field", "profile_value": 0.75},
-      "irrigation_efficiency": {"value": null, "unit": "-", "src": "required", "required_input": true, "label": "Greenhouse irrigation efficiency", "profile_value": 0.92},
-      "extra_water_m3_m2_year": {"value": null, "unit": "m3/m2/year (evaporative cooling losses)", "src": "required", "required_input": true, "label": "Greenhouse evaporative cooling water", "profile_value": 0.8},
-      "energy_kwh_m2_year": {"value": null, "unit": "kWh/m2/year", "src": "required", "required_input": true, "label": "Greenhouse electricity (fans, pads, pumps)", "profile_value": 60},
-      "cooling_share": {"value": 0.8, "unit": "share", "src": "model_choice"},
-      "cooling_delta_c": {"value": null, "unit": "deg C reduction of daily max", "src": "required", "required_input": true, "label": "Greenhouse cooling effect on daily maximum temperature", "profile_value": 8},
-      "heating_delta_c": {"value": null, "unit": "deg C increase of daily min", "src": "required", "required_input": true, "label": "Greenhouse warming effect on daily minimum temperature", "profile_value": 4},
+      "fixed_capex_qar": {
+        "value": null,
+        "unit": "QAR per plot",
+        "src": "required",
+        "required_input": true,
+        "label": "Plastic tunnel fixed setup cost per plot",
+        "profile_value": 8000
+      },
+      "opex_components": {
+        "labour_qar_m2_year": {
+          "value": null,
+          "unit": "QAR/m2/year",
+          "src": "required",
+          "required_input": true,
+          "label": "Plastic tunnel labour",
+          "profile_value": 12
+        },
+        "maintenance_qar_m2_year": {
+          "value": null,
+          "unit": "QAR/m2/year",
+          "src": "required",
+          "required_input": true,
+          "label": "Plastic tunnel maintenance (film, shade net, fans)",
+          "profile_value": 9
+        }
+      },
+      "water_coefficient": {
+        "value": null,
+        "unit": "x open-field crop water demand",
+        "src": "required",
+        "required_input": true,
+        "label": "Greenhouse irrigation water vs open field",
+        "profile_value": 0.75
+      },
+      "irrigation_efficiency": {
+        "value": null,
+        "unit": "-",
+        "src": "required",
+        "required_input": true,
+        "label": "Greenhouse irrigation efficiency",
+        "profile_value": 0.92
+      },
+      "extra_water_m3_m2_year": {
+        "value": null,
+        "unit": "m3/m2/year (evaporative cooling losses)",
+        "src": "required",
+        "required_input": true,
+        "label": "Plastic tunnel evaporative cooling water",
+        "profile_value": 0.5
+      },
+      "energy_kwh_m2_year": {
+        "value": null,
+        "unit": "kWh/m2/year",
+        "src": "required",
+        "required_input": true,
+        "label": "Plastic tunnel electricity (fans, shading, pumps)",
+        "profile_value": 25
+      },
+      "cooling_share": {
+        "value": 0.7,
+        "unit": "share",
+        "src": "model_choice"
+      },
+      "cooling_delta_c": {
+        "value": null,
+        "unit": "deg C reduction of daily max",
+        "src": "required",
+        "required_input": true,
+        "label": "Plastic tunnel cooling effect on daily maximum temperature",
+        "profile_value": 5
+      },
+      "heating_delta_c": {
+        "value": null,
+        "unit": "deg C increase of daily min",
+        "src": "required",
+        "required_input": true,
+        "label": "Plastic tunnel warming effect on daily minimum temperature",
+        "profile_value": 3
+      },
       "climate_controlled": false,
-      "min_area_m2": {"value": 500, "unit": "m2 per plot", "src": "model_choice"},
-      "requires": ["water_network", "climate_plant"]
+      "min_area_m2": {
+        "value": 500,
+        "unit": "m2 per plot",
+        "src": "model_choice"
+      },
+      "requires": [
+        "water_network",
+        "climate_plant"
+      ],
+      "structure_note": "The structure type behind Qatar's official protected-house yield statistics. Costs less than a high-specification evaporatively-cooled glasshouse and delivers the yield the national dataset actually records."
+    },
+    "greenhouse": {
+      "name": "High-spec greenhouse (evaporative cooling / shading)",
+      "model_class": "empirical",
+      "soil_based": true,
+      "rain_exposed": false,
+      "compatible_crops": [
+        "tomato",
+        "cucumber",
+        "lettuce",
+        "bell_pepper",
+        "strawberry"
+      ],
+      "capex_qar_m2": {
+        "value": null,
+        "unit": "QAR/m2",
+        "src": "required",
+        "required_input": true,
+        "label": "Greenhouse structure CapEx (evaporative cooling + shading)",
+        "profile_value": 534,
+        "profile_note": "Figure cited by the project owner for a Qatar greenhouse with evaporative cooling and shading. The underlying publication could not be located or verified during implementation - treat as unverified and replace with a supplier quotation."
+      },
+      "fixed_capex_qar": {
+        "value": null,
+        "unit": "QAR per plot",
+        "src": "required",
+        "required_input": true,
+        "label": "Greenhouse fixed setup cost per plot",
+        "profile_value": 10000
+      },
+      "opex_components": {
+        "labour_qar_m2_year": {
+          "value": null,
+          "unit": "QAR/m2/year",
+          "src": "required",
+          "required_input": true,
+          "label": "Greenhouse labour",
+          "profile_value": 14
+        },
+        "maintenance_qar_m2_year": {
+          "value": null,
+          "unit": "QAR/m2/year",
+          "src": "required",
+          "required_input": true,
+          "label": "Greenhouse maintenance (covers, cooling pads, fans)",
+          "profile_value": 11
+        }
+      },
+      "water_coefficient": {
+        "value": null,
+        "unit": "x open-field crop water demand",
+        "src": "required",
+        "required_input": true,
+        "label": "Greenhouse irrigation water vs open field",
+        "profile_value": 0.75
+      },
+      "irrigation_efficiency": {
+        "value": null,
+        "unit": "-",
+        "src": "required",
+        "required_input": true,
+        "label": "Greenhouse irrigation efficiency",
+        "profile_value": 0.92
+      },
+      "extra_water_m3_m2_year": {
+        "value": null,
+        "unit": "m3/m2/year (evaporative cooling losses)",
+        "src": "required",
+        "required_input": true,
+        "label": "Greenhouse evaporative cooling water",
+        "profile_value": 0.8
+      },
+      "energy_kwh_m2_year": {
+        "value": null,
+        "unit": "kWh/m2/year",
+        "src": "required",
+        "required_input": true,
+        "label": "Greenhouse electricity (fans, pads, pumps)",
+        "profile_value": 60
+      },
+      "cooling_share": {
+        "value": 0.8,
+        "unit": "share",
+        "src": "model_choice"
+      },
+      "cooling_delta_c": {
+        "value": null,
+        "unit": "deg C reduction of daily max",
+        "src": "required",
+        "required_input": true,
+        "label": "Greenhouse cooling effect on daily maximum temperature",
+        "profile_value": 8
+      },
+      "heating_delta_c": {
+        "value": null,
+        "unit": "deg C increase of daily min",
+        "src": "required",
+        "required_input": true,
+        "label": "Greenhouse warming effect on daily minimum temperature",
+        "profile_value": 4
+      },
+      "climate_controlled": false,
+      "min_area_m2": {
+        "value": 500,
+        "unit": "m2 per plot",
+        "src": "model_choice"
+      },
+      "requires": [
+        "water_network",
+        "climate_plant"
+      ],
+      "structure_note": "A higher-specification structure than the tunnels and net houses behind Qatar's official protected-house yield figures. The model applies the same official yield to it, so its extra capital buys no extra output here and the solver will usually prefer the tunnel. Supply a higher yield for this structure if you have one."
     },
     "hydroponic_greenhouse": {
       "name": "Hydroponic greenhouse (evaporative + night cooling)",
       "model_class": "empirical",
       "soil_based": false,
       "rain_exposed": false,
-      "compatible_crops": ["tomato", "cucumber", "lettuce", "bell_pepper", "strawberry"],
-      "capex_qar_m2": {"value": null, "unit": "QAR/m2", "src": "required", "required_input": true, "label": "Hydroponic greenhouse CapEx (structure + night cooling + soilless system)", "profile_value": 624, "profile_note": "Figure cited by the project owner for a Qatar greenhouse with evaporative and night cooling. The publication could not be located or verified, and the figure does not include the soilless growing system. Replace with a supplier quotation."},
-      "fixed_capex_qar": {"value": null, "unit": "QAR per plot", "src": "required", "required_input": true, "label": "Hydroponic greenhouse fixed setup cost per plot", "profile_value": 15000},
-      "opex_components": {
-        "labour_qar_m2_year": {"value": null, "unit": "QAR/m2/year", "src": "required", "required_input": true, "label": "Hydroponic greenhouse labour", "profile_value": 24},
-        "maintenance_qar_m2_year": {"value": null, "unit": "QAR/m2/year", "src": "required", "required_input": true, "label": "Hydroponic greenhouse maintenance (substrate, pumps, dosing)", "profile_value": 26}
+      "compatible_crops": [
+        "tomato",
+        "cucumber",
+        "lettuce",
+        "bell_pepper",
+        "strawberry"
+      ],
+      "capex_qar_m2": {
+        "value": null,
+        "unit": "QAR/m2",
+        "src": "required",
+        "required_input": true,
+        "label": "Hydroponic greenhouse CapEx (structure + night cooling + soilless system)",
+        "profile_value": 624,
+        "profile_note": "Figure cited by the project owner for a Qatar greenhouse with evaporative and night cooling. The publication could not be located or verified, and the figure does not include the soilless growing system. Replace with a supplier quotation."
       },
-      "water_coefficient": {"value": null, "unit": "x open-field crop water demand", "src": "required", "required_input": true, "label": "Hydroponic irrigation water vs open field", "profile_value": 0.5},
-      "irrigation_efficiency": {"value": null, "unit": "-", "src": "required", "required_input": true, "label": "Hydroponic irrigation efficiency (recirculating)", "profile_value": 0.98},
-      "extra_water_m3_m2_year": {"value": null, "unit": "m3/m2/year (evaporative cooling losses)", "src": "required", "required_input": true, "label": "Hydroponic greenhouse evaporative cooling water", "profile_value": 0.5},
-      "energy_kwh_m2_year": {"value": null, "unit": "kWh/m2/year", "src": "required", "required_input": true, "label": "Hydroponic greenhouse electricity", "profile_value": 85},
-      "cooling_share": {"value": 0.75, "unit": "share", "src": "model_choice"},
-      "cooling_delta_c": {"value": null, "unit": "deg C reduction of daily max", "src": "required", "required_input": true, "label": "Hydroponic greenhouse cooling effect", "profile_value": 8},
-      "heating_delta_c": {"value": null, "unit": "deg C increase of daily min", "src": "required", "required_input": true, "label": "Hydroponic greenhouse warming effect", "profile_value": 4},
+      "fixed_capex_qar": {
+        "value": null,
+        "unit": "QAR per plot",
+        "src": "required",
+        "required_input": true,
+        "label": "Hydroponic greenhouse fixed setup cost per plot",
+        "profile_value": 15000
+      },
+      "opex_components": {
+        "labour_qar_m2_year": {
+          "value": null,
+          "unit": "QAR/m2/year",
+          "src": "required",
+          "required_input": true,
+          "label": "Hydroponic greenhouse labour",
+          "profile_value": 24
+        },
+        "maintenance_qar_m2_year": {
+          "value": null,
+          "unit": "QAR/m2/year",
+          "src": "required",
+          "required_input": true,
+          "label": "Hydroponic greenhouse maintenance (substrate, pumps, dosing)",
+          "profile_value": 26
+        }
+      },
+      "water_coefficient": {
+        "value": null,
+        "unit": "x open-field crop water demand",
+        "src": "required",
+        "required_input": true,
+        "label": "Hydroponic irrigation water vs open field",
+        "profile_value": 0.5
+      },
+      "irrigation_efficiency": {
+        "value": null,
+        "unit": "-",
+        "src": "required",
+        "required_input": true,
+        "label": "Hydroponic irrigation efficiency (recirculating)",
+        "profile_value": 0.98
+      },
+      "extra_water_m3_m2_year": {
+        "value": null,
+        "unit": "m3/m2/year (evaporative cooling losses)",
+        "src": "required",
+        "required_input": true,
+        "label": "Hydroponic greenhouse evaporative cooling water",
+        "profile_value": 0.5
+      },
+      "energy_kwh_m2_year": {
+        "value": null,
+        "unit": "kWh/m2/year",
+        "src": "required",
+        "required_input": true,
+        "label": "Hydroponic greenhouse electricity",
+        "profile_value": 85
+      },
+      "cooling_share": {
+        "value": 0.75,
+        "unit": "share",
+        "src": "model_choice"
+      },
+      "cooling_delta_c": {
+        "value": null,
+        "unit": "deg C reduction of daily max",
+        "src": "required",
+        "required_input": true,
+        "label": "Hydroponic greenhouse cooling effect",
+        "profile_value": 8
+      },
+      "heating_delta_c": {
+        "value": null,
+        "unit": "deg C increase of daily min",
+        "src": "required",
+        "required_input": true,
+        "label": "Hydroponic greenhouse warming effect",
+        "profile_value": 4
+      },
       "climate_controlled": false,
-      "min_area_m2": {"value": 500, "unit": "m2 per plot", "src": "model_choice"},
-      "requires": ["water_network", "climate_plant", "nutrient_dosing"]
+      "min_area_m2": {
+        "value": 500,
+        "unit": "m2 per plot",
+        "src": "model_choice"
+      },
+      "requires": [
+        "water_network",
+        "climate_plant",
+        "nutrient_dosing"
+      ]
     },
     "vertical_hydroponics": {
       "name": "Vertical hydroponics",
       "model_class": "empirical",
       "soil_based": false,
       "rain_exposed": false,
-      "compatible_crops": ["lettuce", "strawberry"],
+      "compatible_crops": [
+        "lettuce",
+        "strawberry"
+      ],
       "no_profile_reason": "No Qatar or peer-reviewed capital-cost figure for vertical farming was located during implementation. Per the project rules this system requires a real vendor quotation, so it has no planning-profile fallback and stays excluded until costs are entered.",
-      "capex_qar_m2": {"value": null, "unit": "QAR/m2 footprint", "src": "required", "required_input": true, "label": "Vertical farm CapEx - vendor quotation required"},
-      "fixed_capex_qar": {"value": null, "unit": "QAR per plot", "src": "required", "required_input": true, "label": "Vertical farm fixed setup cost - vendor quotation required"},
-      "opex_components": {
-        "labour_qar_m2_year": {"value": null, "unit": "QAR/m2 footprint/year", "src": "required", "required_input": true, "label": "Vertical farm labour"},
-        "maintenance_qar_m2_year": {"value": null, "unit": "QAR/m2 footprint/year", "src": "required", "required_input": true, "label": "Vertical farm maintenance (lighting, pumps, substrate)"}
+      "capex_qar_m2": {
+        "value": null,
+        "unit": "QAR/m2 footprint",
+        "src": "required",
+        "required_input": true,
+        "label": "Vertical farm CapEx - vendor quotation required"
       },
-      "water_coefficient": {"value": null, "unit": "x open-field crop water demand per m2 footprint", "src": "required", "required_input": true, "label": "Vertical farm water use vs open field"},
-      "irrigation_efficiency": {"value": null, "unit": "-", "src": "required", "required_input": true, "label": "Vertical farm irrigation efficiency"},
-      "extra_water_m3_m2_year": {"value": 0.0, "unit": "m3/m2/year", "src": "model_choice"},
-      "energy_kwh_m2_year": {"value": null, "unit": "kWh/m2 footprint/year", "src": "required", "required_input": true, "label": "Vertical farm electricity (lighting + HVAC) - vendor quotation required"},
-      "cooling_share": {"value": 0.3, "unit": "share", "src": "model_choice"},
-      "cooling_delta_c": {"value": 0, "unit": "deg C", "src": "model_choice"},
-      "heating_delta_c": {"value": 0, "unit": "deg C", "src": "model_choice"},
+      "fixed_capex_qar": {
+        "value": null,
+        "unit": "QAR per plot",
+        "src": "required",
+        "required_input": true,
+        "label": "Vertical farm fixed setup cost - vendor quotation required"
+      },
+      "opex_components": {
+        "labour_qar_m2_year": {
+          "value": null,
+          "unit": "QAR/m2 footprint/year",
+          "src": "required",
+          "required_input": true,
+          "label": "Vertical farm labour"
+        },
+        "maintenance_qar_m2_year": {
+          "value": null,
+          "unit": "QAR/m2 footprint/year",
+          "src": "required",
+          "required_input": true,
+          "label": "Vertical farm maintenance (lighting, pumps, substrate)"
+        }
+      },
+      "water_coefficient": {
+        "value": null,
+        "unit": "x open-field crop water demand per m2 footprint",
+        "src": "required",
+        "required_input": true,
+        "label": "Vertical farm water use vs open field"
+      },
+      "irrigation_efficiency": {
+        "value": null,
+        "unit": "-",
+        "src": "required",
+        "required_input": true,
+        "label": "Vertical farm irrigation efficiency"
+      },
+      "extra_water_m3_m2_year": {
+        "value": 0.0,
+        "unit": "m3/m2/year",
+        "src": "model_choice"
+      },
+      "energy_kwh_m2_year": {
+        "value": null,
+        "unit": "kWh/m2 footprint/year",
+        "src": "required",
+        "required_input": true,
+        "label": "Vertical farm electricity (lighting + HVAC) - vendor quotation required"
+      },
+      "cooling_share": {
+        "value": 0.3,
+        "unit": "share",
+        "src": "model_choice"
+      },
+      "cooling_delta_c": {
+        "value": 0,
+        "unit": "deg C",
+        "src": "model_choice"
+      },
+      "heating_delta_c": {
+        "value": 0,
+        "unit": "deg C",
+        "src": "model_choice"
+      },
       "climate_controlled": true,
-      "min_area_m2": {"value": 100, "unit": "m2 footprint per plot", "src": "model_choice"},
-      "requires": ["water_network", "climate_plant", "nutrient_dosing"]
+      "min_area_m2": {
+        "value": 100,
+        "unit": "m2 footprint per plot",
+        "src": "model_choice"
+      },
+      "requires": [
+        "water_network",
+        "climate_plant",
+        "nutrient_dosing"
+      ]
     }
   }
 }

@@ -12,11 +12,12 @@ export const signed = (v: number | null | undefined, f: (x: number) => string = 
 
 export const TECH_COLOR: Record<string, string> = {
   open_field: "#a8892f",
+  plastic_tunnel: "#6b8f3a",
   greenhouse: "#2f7d68",
   hydroponic_greenhouse: "#2d6796",
   vertical_hydroponics: "#7d4d8f",
 };
-export const TECH_ORDER = ["greenhouse", "hydroponic_greenhouse", "vertical_hydroponics", "open_field"];
+export const TECH_ORDER = ["greenhouse", "hydroponic_greenhouse", "vertical_hydroponics", "plastic_tunnel", "open_field"];
 export const ACCESS_COLOR = "#8d8d86";
 export const RESERVE_COLOR = "#c9c6bb";
 export const qarKg = (v: number) => `QAR ${v.toFixed(2)}/kg`;

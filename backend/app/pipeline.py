@@ -17,6 +17,7 @@ from typing import Callable
 from . import aquacrop_model, baseline as baseline_mod, catalog as catalog_mod, climate, crop_model, finance, optimizer
 from .datapanel import build_data_panel
 from .limiting import diagnose
+from .summary import optimal_management
 from .adapters import nasa_power, osm, qatar_open_data as qod, soilgrids
 from .adapters.base import AdapterUnavailable
 from .optimizer import GroupIn, Limits, Option, PlotIn, Problem, TechIn
@@ -135,15 +136,24 @@ def prepare_context(req: OptimizeRequest, emit: Emit = _noop) -> Ctx:
     emit({"event": "stage", "name": "qatar_open_data", "message": "Reading Qatar Open Data crop yield statistics"})
     for cid in req.crops:
         crop = cat["crops"][cid]
-        for kind, store, fn in (("open_field", ctx.stats_open, qod.open_field_yield), ("greenhouse", ctx.stats_gh, qod.greenhouse_yield)):
-            names = crop["qatar_names"].get(kind, [])
-            if not names:
-                store[cid] = "no Qatar Open Data series for this crop"
-                continue
+        gh_names = crop["qatar_names"].get("greenhouse", [])
+        of_names = crop["qatar_names"].get("open_field", [])
+        # Open field is derived as (national total - greenhouse): the "crops" dataset is the national total
+        # across all growing systems, not open-field production. See adapters/qatar_open_data.py.
+        if of_names:
             try:
-                store[cid] = fn(names)
+                ctx.stats_open[cid] = qod.decomposed_open_field_yield(of_names, gh_names)
             except AdapterUnavailable as exc:
-                store[cid] = f"Qatar Open Data unavailable: {exc}"
+                ctx.stats_open[cid] = f"Qatar Open Data unavailable: {exc}"
+        else:
+            ctx.stats_open[cid] = "no Qatar Open Data series for this crop"
+        if gh_names:
+            try:
+                ctx.stats_gh[cid] = qod.greenhouse_yield(gh_names)
+            except AdapterUnavailable as exc:
+                ctx.stats_gh[cid] = f"Qatar Open Data unavailable: {exc}"
+        else:
+            ctx.stats_gh[cid] = "no Qatar greenhouse series for this crop"
     # reference weather for the AquaCrop calibration
     if "tomato" in req.crops and "open_field" in req.techniques:
         try:
@@ -157,6 +167,10 @@ def prepare_context(req: OptimizeRequest, emit: Emit = _noop) -> Ctx:
 # 2. options
 # ------------------------------------------------------------------------------------------------
 MIN_OBS = 3
+# The open-field series is derived by subtracting the greenhouse dataset from the national total, and the
+# two datasets only overlap for 2020-2022, so at most three years can ever qualify. Two consistent years
+# are accepted for a decomposed series; a single year is not.
+MIN_OBS_DECOMPOSED = 2
 
 
 def _tariffs(ctx: Ctx, scenario: dict) -> tuple[float | None, float | None, str, str]:
@@ -180,13 +194,23 @@ def _yield_for(ctx: Ctx, pc: PlotCtx, cid: str, tid: str, sched: dict | None) ->
     dyn = entry.get("dynamic")
     if dyn is None:
         return {"kg_m2_cycle": entry["value"], "src": entry["src"], "kind": "parameter", "note": "", "max_cycles": entry["max_cycles"], "cycle_days": entry.get("cycle_days")}
+    # "greenhouse" here means Qatar's official protected-house series, which covers tunnels and net houses too.
     store = ctx.stats_open if dyn == "open_field" else ctx.stats_gh
     stat = store.get(cid)
     if isinstance(stat, str):
         return stat
     res, meta = stat
-    if res["n"] < MIN_OBS or res["kg_m2"] is None:
-        return f"only {res['n']} usable Qatar Open Data year(s) (need >= {MIN_OBS}); no value invented"
+    decomposed = bool(res.get("decomposed"))
+    need = MIN_OBS_DECOMPOSED if decomposed else MIN_OBS
+    if res.get("effectively_protected"):
+        share = res.get("open_field_share") or 0.0
+        return (f"effectively all of Qatar's {crop['name'].lower()} is grown under protection "
+                f"(only {share:.1%} of the cropped area is open field), so open-field production is not "
+                "a supported configuration for this crop")
+    if res["kg_m2"] is None or res["n"] < need:
+        src = ("national total minus greenhouse, which the two official datasets only allow for 2020-2022"
+               if decomposed else "Qatar Open Data")
+        return f"only {res['n']} usable year(s) from {src} (need >= {need}); no value invented"
     base = {"src": entry["src"], "max_cycles": entry["max_cycles"], "cycle_days": entry.get("cycle_days"),
             "stat": res, "stat_meta": meta}
     if crop["aquacrop"].get("supported") and tid == "open_field" and pc.df is not None and ctx.ref_df is not None and sched is not None:
@@ -302,6 +326,11 @@ def build_problem(ctx: Ctx, scenario_id: str) -> tuple[Problem, list[dict], dict
                  water_month_max=c.water_peak_m3_month if c.water_peak_m3_month else float("inf"),
                  energy_month_max=c.energy_peak_kwh_month if c.energy_peak_kwh_month else float("inf"),
                  min_utilisation=c.min_land_utilisation, min_block_m2=c.min_block_m2,
+                 min_distinct_combos=c.min_distinct_combos if c.mode == "portfolio" else 0,
+                 min_combo_area_share=c.min_combo_area_share if c.mode == "portfolio" else 0.0,
+                 min_distinct_techniques=c.min_distinct_techniques if c.mode == "portfolio" else 0,
+                 min_distinct_crops=c.min_distinct_crops if c.mode == "portfolio" else 0,
+                 min_crop_area_share=c.min_crop_area_share if c.mode == "portfolio" else 0.0,
                  horizon_years=c.horizon_years, objective=c.objective, max_crop_share=c.max_crop_share)
     problem = Problem([PlotIn(p.id, p.usable_m2) for p in ctx.plots], options, techs, groups, lim)
     return problem, excluded, detail
@@ -318,7 +347,8 @@ def _summary(problem: Problem, metrics: dict) -> dict:
     return d
 
 
-def solve_scenario(ctx: Ctx, scenario_id: str, emit: Emit = _noop, with_context: bool = True) -> dict:
+def solve_scenario(ctx: Ctx, scenario_id: str, emit: Emit = _noop, with_context: bool = True,
+                   with_alternatives: bool = True) -> dict:
     t0 = time.perf_counter()
     cat = ctx.cat
     if scenario_id not in cat["scenarios"]:
@@ -334,6 +364,14 @@ def solve_scenario(ctx: Ctx, scenario_id: str, emit: Emit = _noop, with_context:
     base = baseline_mod.best_baseline(problem, sol.utilisation_floor_used) if sol.alloc else None
     base_free = baseline_mod.best_single_option_free(problem, sol.utilisation_floor_used) if sol.alloc else None
     result = assemble(ctx, scenario_id, problem, sol, base, excluded, detail, with_context, base_free)
+    if with_alternatives:
+        from .alternatives import build as build_alternatives
+        emit({"event": "stage", "name": "alternatives",
+              "message": "Solving the same model for the other decision questions (cash flow, water, capital)"})
+        result["alternatives"] = build_alternatives(problem, ctx.cat, detail,
+                                                   sum(p.usable_m2 for p in ctx.plots))
+    else:
+        result["alternatives"] = []
     result["timing_ms"] = round((time.perf_counter() - t0) * 1000)
     return result
 
@@ -435,11 +473,35 @@ def assemble(ctx: Ctx, scenario_id: str, problem: Problem, sol: optimizer.Soluti
         "options": opt_table,
         "excluded": excluded,
         "limiting": diagnose(problem, sol, sum(p.usable_m2 for p in ctx.plots)),
+        "relaxations": list(getattr(sol, "relaxations", [])),
+        "effective_composition": {
+            "min_distinct_combos": (sol.effective_limits or lim).min_distinct_combos,
+            "min_combo_area_share": (sol.effective_limits or lim).min_combo_area_share,
+            "min_distinct_techniques": (sol.effective_limits or lim).min_distinct_techniques,
+            "min_distinct_crops": (sol.effective_limits or lim).min_distinct_crops,
+            "min_crop_area_share": (sol.effective_limits or lim).min_crop_area_share,
+        },
+        "composition": {
+            "min_distinct_combos": lim.min_distinct_combos,
+            "min_combo_area_share": lim.min_combo_area_share,
+            "min_distinct_techniques": lim.min_distinct_techniques,
+            "min_distinct_crops": lim.min_distinct_crops,
+            "min_crop_area_share": lim.min_crop_area_share,
+            "min_land_utilisation": lim.min_utilisation,
+            "mode": ctx.req.constraints.mode,
+            "distinct_combos": len({(r["crop"], r["technique"]) for r in portfolio}),
+            "distinct_techniques": len({r["technique"] for r in portfolio}),
+            "distinct_crops": len({r["crop"] for r in portfolio}),
+            "land_utilisation": (sol.metrics["area_m2"] / sum(p.usable_m2 for p in ctx.plots))
+                                if sum(p.usable_m2 for p in ctx.plots) else 0.0,
+        },
+        "matrix": support_matrix(ctx, problem, detail, excluded),
         "warnings": list(sol.warnings) + list(ctx.notes),
         "missing_inputs": ctx.missing_inputs,
         "accepted_planning_profile": ctx.req.accept_planning_profile,
     }
     out["explanations"] = explain(out, problem, sol, cat, detail) if sol.alloc else []
+    out["management"] = optimal_management(out, problem, sol, cat, detail)
     out["data_panel"] = [r.to_dict() for r in build_data_panel(ctx, problem, detail, scenario_id, sol, _tariffs(ctx, cat["scenarios"][scenario_id]))]
     if with_context:
         out["context"] = [{"plot_id": pc.id, "market_access": pc.access, "error": pc.access_error} for pc in ctx.plots]
@@ -449,3 +511,51 @@ def assemble(ctx: Ctx, scenario_id: str, problem: Problem, sol: optimizer.Soluti
 # ------------------------------------------------------------------------------------------------
 # 4. data & assumptions panel
 # ------------------------------------------------------------------------------------------------
+
+
+# ------------------------------------------------------------------------------------------------
+# 6. crop x technique support matrix - what is modelled, what is not, and on what evidence
+# ------------------------------------------------------------------------------------------------
+PROVENANCE = {
+    "aquacrop": ("Model", "FAO AquaCrop simulation calibrated to the Qatar statistic"),
+    "official": ("Source", "Official Qatar Open Data"),
+    "parameter": ("Assumption", "Editable estimate - no official Qatar figure exists"),
+}
+
+
+def support_matrix(ctx: Ctx, problem: Problem, detail: dict, excluded: list[dict]) -> list[dict]:
+    """One row per crop x technique, for every crop and technique the user selected."""
+    cat, req = ctx.cat, ctx.req
+    by_plot_excl: dict[tuple[str, str], dict] = {}
+    for e in excluded:
+        by_plot_excl.setdefault((e["crop"], e["technique"]), e)
+    rows: list[dict] = []
+    for cid in req.crops:
+        for tid in req.techniques:
+            crop, tech = cat["crops"][cid], cat["techniques"][tid]
+            d = next((v for (p, c, t), v in detail.items() if c == cid and t == tid), None)
+            if d is not None:
+                kind, why = PROVENANCE.get(d["yield_kind"], ("Assumption", ""))
+                opt = next((o for o in problem.options if o.key == (cid, tid)), None)
+                rows.append({
+                    "crop": cid, "crop_name": crop["name"], "technique": tid, "technique_name": tech["name"],
+                    "state": "modelled", "provenance": kind, "provenance_detail": why,
+                    "yield_kg_m2_cycle": d["yield_kg_m2_cycle"], "cycles_per_year": d["cycles"],
+                    "yield_kg_m2_year": None if opt is None else opt.yield_kg_m2,
+                    "profit_m2_year": None if opt is None else opt.rev_m2 - opt.opex_m2,
+                    "capex_m2": d.get("capex_m2"),
+                    "water_m3_m2_year": None if opt is None else opt.water_year,
+                    "model_class": tech["model_class"], "note": d.get("yield_note", ""),
+                })
+                continue
+            e = by_plot_excl.get((cid, tid))
+            kind = (e or {}).get("kind", "unsupported")
+            rows.append({
+                "crop": cid, "crop_name": crop["name"], "technique": tid, "technique_name": tech["name"],
+                "state": "unsupported" if kind in ("incompatible", "climate", "data") else "needs_input",
+                "provenance": "-", "provenance_detail": "",
+                "reason_kind": kind, "reason": (e or {}).get("reason", "not evaluated"),
+                "missing": (e or {}).get("missing", []),
+                "model_class": tech["model_class"],
+            })
+    return rows

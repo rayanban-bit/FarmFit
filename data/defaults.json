@@ -1,13 +1,13 @@
 {
-  "_readme": "Planning parameters. Tariffs have no machine-readable official source (Kahramaa publishes a 'Productive Farms' category but only through an interactive calculator), so they are required inputs: enter them from your own Kahramaa bill. Structural modelling choices are labelled model_choice and are documented in the README.",
+  "_readme": "Planning parameters. The budget, water and energy defaults are sized to develop roughly 3 ha of protected cultivation in Qatar (about 28,500 m2 at the plastic-tunnel cost, its irrigation demand and its cooling load), so the demonstration is a fundable farm rather than a starved one. All three are user inputs and editable. Tariffs have no machine-readable official source (Kahramaa publishes a 'Productive Farms' category but only through an interactive calculator), so they are required inputs: enter them from your own Kahramaa bill. Structural modelling choices are labelled model_choice and are documented in the README.",
   "electricity_qar_kwh": {"value": null, "unit": "QAR/kWh", "src": "required", "required_input": true, "label": "Electricity unit price (Kahramaa 'Productive Farms' tariff, from your bill)", "profile_value": 0.12},
   "water_qar_m3": {"value": null, "unit": "QAR/m3", "src": "required", "required_input": true, "label": "Water unit price (Kahramaa 'Productive Farms' tariff, from your bill)", "profile_value": 0.6},
   "access_fraction": {"value": 0.08, "unit": "share of plot area kept for access/infrastructure", "src": "model_choice"},
-  "min_land_utilisation": {"value": 0.8, "unit": "share of usable area", "src": "model_choice"},
+  "min_land_utilisation": {"value": 0.95, "unit": "share of usable area", "src": "model_choice"},
   "min_block_m2": {"value": 100, "unit": "m2 (smallest production block)", "src": "model_choice"},
   "horizon_years": {"value": 5, "unit": "years", "src": "model_choice"},
   "effective_rain_fraction": {"value": 0.6, "unit": "-", "src": "model_choice"},
-  "budget_qar": {"value": 1200000, "unit": "QAR", "src": "user"},
-  "water_m3_year": {"value": 16000, "unit": "m3/year", "src": "user"},
-  "energy_kwh_year": {"value": 400000, "unit": "kWh/year", "src": "user"}
+  "budget_qar": {"value": 7000000, "unit": "QAR", "src": "user"},
+  "water_m3_year": {"value": 30000, "unit": "m3/year", "src": "user"},
+  "energy_kwh_year": {"value": 700000, "unit": "kWh/year", "src": "user"}
 }
